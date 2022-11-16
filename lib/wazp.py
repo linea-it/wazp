@@ -23,6 +23,7 @@ from skimage.feature import peak_local_max
 import logging 
 import yaml
 import subprocess
+import time
 
 from .utils import join_struct_arrays, dist_ang
 from .utils import _mstar_, makeHealpixMap, radec_window_area
@@ -1799,10 +1800,13 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     )
             ):
                 print ('.............. Detection in slice ', isl)
+                wazp_tile_slice_start = time.time()
                 data_peaks = wazp_tile_slice(
                     tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
                     out_paths, verbose)
+                wazp_tile_slice_end = time.time()
+                print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', wazp_tile_slice_end - wazp_tile_slice_start)
                 np.save(
                     os.path.join(
                         out_paths['workdir_loc'], out_paths['wazp']['files'], 

@@ -1,6 +1,7 @@
 import numpy as np
 import yaml, os, sys, json
 from astropy.table import join
+import time
 
 from lib.multithread import split_survey
 from lib.utils import create_directory
@@ -95,8 +96,16 @@ if not os.path.isfile(gbkg_filename):
 
 # detect clusters on all tiles 
 print ('Run wazp in tiles')
+
+# Measure time for run_waz_tile
+run_wazp_all_tile_start = time.time()
+
 for ith in np.unique(all_tiles['thread_id']): 
     run_wazp_tile(config, dconfig, ith)
+
+run_wazp_all_tile_end = time.time()
+print('Total Time all Tiles: ', (run_wazp_all_tile_end - run_wazp_all_tile_start))
+
 
 # tiles with clusters 
 eff_tiles = tiles_with_clusters(param_cfg['out_paths'], all_tiles)
