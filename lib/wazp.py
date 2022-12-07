@@ -51,6 +51,22 @@ def create_wazp_directories(workdir):
     return
 
 
+def get_in_memory_directory(tiledir=None):
+    """
+    Return the path /run/user/$UID/wazp_in_mem (in-memory temp filesystem)
+
+    If tiledir is passed, assume it represents the path workdir/tiles/<tile_dirname>,
+    and return /run/user/$UID/wazp_in_mem/<tile_dirname>.
+    """
+    in_mem_dir = os.path.join('/run', 'user', str(os.getuid()), 'wazp_in_mem')
+    if tiledir is None:
+        # /run/user/$UID/wazp_in_mem
+        return in_mem_dir
+    else:
+        tile_dirname = os.path.basename(os.path.normpath(tiledir))
+        return os.path.join(in_mem_dir, tile_dirname)
+
+
 def create_tile_directories(root, path): 
     """
     creates the relevant directories for writing results/plots
@@ -61,6 +77,10 @@ def create_tile_directories(root, path):
         os.mkdir(os.path.join(root, path['plots']))
     if not os.path.exists(os.path.join(root, path['files'])):
         os.mkdir(os.path.join(root, path['files']))
+
+    # create directory for tile in temp filesystem
+    tile_in_mem_dir = get_in_memory_directory(root)
+    create_directory(tile_in_mem_dir)
     return
 
 
@@ -665,7 +685,7 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
     scale_max_pix = wazp_cfg['scale_max_mpc'] * float(wazp_cfg['resolution'])
     smin = int(round(math.log10(scale_min_pix)/math.log10(2.)))
     smax = int(round(math.log10(scale_max_pix)/math.log10(2.)))
-
+    print('Run forrest run!')
 
     if smin == 0:
         subprocess.run((
@@ -696,19 +716,23 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
         ), check=True, shell=True, stdout=subprocess.PIPE).stdout
+    os.remove(filled_catimage)
     return
 
 
 def fits2map(wmap):
+    print('Function fits2map')
     hdulist = fits.open(wmap,ignore_missing_end=True)
     hdu = hdulist[0]
     wmap_t = hdulist[0].data
     w = wcs.WCS(hdu.header)
     wmap_data = wmap_t.T
+
     return wmap_data
 
 
 def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
+    print('Function wmap2peaks.....')
     wmap_thresh = wazp_specs['wmap_thresh']
     wmap_data = fits2map(wmap)
     w, nxy = create_wcs_at_z(wazp_specs, tile_specs, zsl, cosmo_params)
@@ -721,6 +745,7 @@ def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
     jobj = jobj0[(wmap_data[iobj0.astype(int),jobj0.astype(int)]> wmap_thresh) ]
     ra_peak, dec_peak =  w.all_pix2world(iobj,jobj,1)[0],\
                          w.all_pix2world(iobj,jobj,1)[1]
+    os.remove(wmap)
     return ra_peak, dec_peak, iobj, jobj
 
 
@@ -1649,19 +1674,14 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         paths['workdir_loc'], paths['wazp']['files'], 
         'xycat_'+str(isl)+'.fits'
     )
-    xycat_fi_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        'xycat_fi_'+str(isl)+'.fits'
-    )
-    wmap_fitsname =  os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        'wmap_'+str(isl)+'.fits'
-    )
-    peaks_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        "peaks_"+str(isl)+".fits"
-    )
+    tile_dir = paths['workdir_loc']
+    # Create directories and files in memory
+    tile_dir_in_memory = get_in_memory_directory(tile_dir)
+    xycat_fi_fitsname = os.path.join(tile_dir_in_memory, 'xycat_fi_'+str(isl)+'.fits')
+    wmap_fitsname = os.path.join(tile_dir_in_memory, 'wmap_'+str(isl)+'.fits')
+    peaks_fitsname = os.path.join(tile_dir_in_memory, 'peaks_'+str(isl)+'.fits')
 
+    
     # select objects for computing density maps 
     ra_map, dec_map, weight_map = select_galaxies_in_slice(
         dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 

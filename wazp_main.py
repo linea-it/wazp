@@ -8,7 +8,7 @@ from lib.utils import create_directory
 from lib.utils import update_data_structure, get_footprint
 from lib.wazp import compute_zpslices, bkg_global_survey
 from lib.wazp import run_wazp_tile, wazp_concatenate
-from lib.wazp import update_config, create_wazp_directories
+from lib.wazp import update_config, create_wazp_directories, get_in_memory_directory
 from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
@@ -32,6 +32,10 @@ print ('Workdir = ', param_cfg['out_paths']['workdir'])
 # create directory structure 
 workdir = param_cfg['out_paths']['workdir']
 create_wazp_directories(workdir)
+
+# create in memory directory, depends on $UID
+in_mem_dir = get_in_memory_directory()
+create_directory(in_mem_dir)
 
 # create required data structure if not exist and update params
 param_data = update_data_structure(param_cfg, param_data)
