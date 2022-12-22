@@ -24,6 +24,20 @@ import logging
 import yaml
 import subprocess
 
+
+## PARSL
+import parsl
+from parsl.app.app import python_app, bash_app
+from parsl.configs.local_threads import config
+#from parsl.executors import ThreadPoolExecutor
+parsl.load(config)
+#from joblib import Parallel, delayed
+import psutil
+#import cProfile, pstats, io
+#from pstats import SortKey
+import re
+
+
 from .utils import join_struct_arrays, dist_ang
 from .utils import _mstar_, makeHealpixMap, radec_window_area
 from .utils import area_ann_deg2, hpx_in_annulus, sub_hpix, cond_in_disc
@@ -1640,8 +1654,23 @@ def wave_radius(wmap_data, ip, jp, wazp_cfg):
 def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
                     zpslices, gbkg, mstar_file, wazp_cfg, cosmo_params, 
                     paths, verbose):
+
+
+
+
+    isl = zpslices['id']
     
-    isl = zpslices['id']                                 
+    pinit = "disk_io_slice{}_init ".format(isl)+str(psutil.disk_io_counters())
+    pinit = re.sub(r' sdiskio',',', pinit)
+    pinit = re.sub(r'[()]','', str(pinit))
+    #print(pinit)
+    with open("psutil_wazp_tile.csv", "a") as f:
+        f.write(pinit + "\n")
+
+
+    #pr = cProfile.Profile()
+    #pr.enable()
+
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
     conv_factor = cosmo.angular_diameter_distance( zpslices['zsl']) 
     xycat_fitsname = os.path.join(
@@ -1755,6 +1784,24 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         )
         t = Table (data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']])
         t.write(peaks_fitsname,overwrite=True)
+    
+    
+    #pend = psutil.disk_io_counters()
+    pend = "disk_io_slice{}_end ".format(isl)+str(psutil.disk_io_counters())
+    pend = re.sub(r' sdiskio',',', str(pend))
+    pend = re.sub(r'[()]','', str(pend))
+    #print(pend)
+    with open("psutil_wazp_tile.csv", "a") as f:
+        f.write(pend + "\n")
+
+
+    
+    #pr.disable()
+    #s = io.StringIO()
+    #sortby = SortKey.CUMULATIVE
+    #ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    #ps.print_stats()
+    #print("CPROFILEIO ",s.getvalue())
 
     return data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']]
 
@@ -1791,6 +1838,8 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     ):
         peaks_list = []
         npeaks_tot = 0
+
+
         for isl in range (0, len(zpslices)):
             if not os.path.isfile(
                     os.path.join(
@@ -1803,6 +1852,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
                     out_paths, verbose)
+                
                 np.save(
                     os.path.join(
                         out_paths['workdir_loc'], out_paths['wazp']['files'], 
@@ -1810,6 +1860,8 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     ), data_peaks
                 )
                 npeaks_tot += len(data_peaks)
+
+
             else:
                 print ('.............. Use existing detections in slice ', isl)
                 data_peaks = np.load(
@@ -1819,13 +1871,22 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                     )
                 )
                 npeaks_tot += len(data_peaks)
-            peaks_list.append(data_peaks)        
+               
+                
+            peaks_list.append(data_peaks)
+
+       
 
         if npeaks_tot>0:
             print ('..........Start cylinders')
             data_cylinders = make_cylinders(
                 peaks_list, zpslices, wazp_cfg, cosmo_params
             )
+            #####
+            #print('##########peaks_list#############')
+            #print(peaks_list)
+            #print('##########peaks_list#############')
+            #####
             if verbose >=1:
                 t = Table (data_cylinders)
                 t.write(os.path.join(

@@ -12,6 +12,29 @@ from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
+from palanteer import *
+
+#plInitAndStart("wazp_remote",server_address ="127.0.0.1")
+plInitAndStart("wazp_remote",                                   # Name of the program (mandatory)
+                   server_address  = "127.0.0.1",              # Server IP address (server=viewer or scripting module)
+                   server_port     = 59059,                    # Server port
+                   do_wait_for_server_connection = False,      # If True, this call blocks until a remote connection is established
+                   with_functions  = True,                     # If True, function entering and leaving are automatically instrumented (Python and C)
+                   with_exceptions = True,                     # If True, exception are automatically instrumented (as a log)
+                   with_memory     = True,                     # If True, the memory allocations/deallocations are traced
+                   with_gc         = True,                     # If True, garbage collection is automatically instrumented (as a lock)
+                   with_c_calls    = True                      # If True, the C calls are traced. Set it to False if builtins calls are too verbose
+                   )
+
+## PARSL
+#import parsl
+#from parsl.app.app import python_app, bash_app
+#from parsl.configs.local_threads import config
+#from joblib import Parallel, delayed
+#import multiprocessing
+#from multiprocessing import Process
+
+
 # read config files as online arguments 
 config = sys.argv[1]
 dconfig = sys.argv[2]
@@ -95,8 +118,10 @@ if not os.path.isfile(gbkg_filename):
 
 # detect clusters on all tiles 
 print ('Run wazp in tiles')
-for ith in np.unique(all_tiles['thread_id']): 
+for ith in np.unique(all_tiles['thread_id']):
     run_wazp_tile(config, dconfig, ith)
+
+plStopAndUninit()
 
 # tiles with clusters 
 eff_tiles = tiles_with_clusters(param_cfg['out_paths'], all_tiles)
