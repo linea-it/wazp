@@ -35,6 +35,25 @@ from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
 from .utils import add_clusters_unique_id, create_tile_specs
 from .utils import hpx_degrade
 
+# IMPORT FOR PARSL
+import parsl
+from parsl.app.app import join_app, python_app
+from parsl.config import Config
+from parsl.executors.threads import ThreadPoolExecutor
+
+local_threads = Config(
+    executors=[
+        ThreadPoolExecutor(
+            max_threads=12,
+            label='local_threads'
+        )
+    ]
+)
+
+parsl.clear()
+parsl.load(local_threads)
+# parsl.load()
+
 def tile_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
 
@@ -721,7 +740,7 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
 
 
 def fits2map(wmap):
-    print('Function fits2map')
+    print('Function fits2map.....')
     hdulist = fits.open(wmap,ignore_missing_end=True)
     hdu = hdulist[0]
     wmap_t = hdulist[0].data
@@ -871,6 +890,7 @@ def add_peaks_attributes(data_peaks, dat_galcat, galcat,
                          wazp_cfg, zpslices, gbkg, 
                          mstar_file, aper_deg, cosmo_params):
 
+    
     Nbkg_rich, Lbkg_rich = gbkg['nbar_rich'], gbkg['lbar_rich']
     Nbkg_snr, Lbkg_snr = gbkg['nbar_snr'], gbkg['lbar_snr']
     sig_N =  (gbkg['nbar_snr']*(1.+gbkg['ksi2']))**0.5
@@ -1663,6 +1683,52 @@ def wave_radius(wmap_data, ip, jp, wazp_cfg):
     return radius_mpc
 
 
+@python_app
+def process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
+            zpslices, gbkg, zp_metrics, mstar_file, 
+            wazp_cfg, clcat, cosmo_params, out_paths, verbose):
+
+    tile_dir = out_paths['workdir_loc']
+    tile_dir_in_memory = get_in_memory_directory(tile_dir)
+
+    if not os.path.isfile(
+        os.path.join(
+        tile_dir_in_memory,
+        # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+        'peaks_'+str(isl)+'.npy'
+        )
+    ):
+        print ('.............. Detection in slice ', isl)
+        wazp_tile_slice_start = time.time()
+        data_peaks = wazp_tile_slice(
+            tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
+            zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
+            out_paths, verbose)
+        wazp_tile_slice_end = time.time()
+        print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', wazp_tile_slice_end - wazp_tile_slice_start)
+                
+        np.save(
+            # Change to save in memory
+            os.path.join(
+                tile_dir_in_memory, 
+                # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                'peaks_'+str(isl)+'.npy'
+            ), data_peaks
+        )
+    else:
+        print ('.............. Use existing detections in slice ', isl)
+        data_peaks = np.load(
+            os.path.join(
+                tile_dir_in_memory,
+                # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                'peaks_'+str(isl)+'.npy'
+            )
+        )
+
+    return data_peaks
+
+
+
 def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
                     zpslices, gbkg, mstar_file, wazp_cfg, cosmo_params, 
                     paths, verbose):
@@ -1674,9 +1740,11 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         paths['workdir_loc'], paths['wazp']['files'], 
         'xycat_'+str(isl)+'.fits'
     )
-    tile_dir = paths['workdir_loc']
+
     # Create directories and files in memory
+    tile_dir = paths['workdir_loc']    
     tile_dir_in_memory = get_in_memory_directory(tile_dir)
+
     xycat_fi_fitsname = os.path.join(tile_dir_in_memory, 'xycat_fi_'+str(isl)+'.fits')
     wmap_fitsname = os.path.join(tile_dir_in_memory, 'wmap_'+str(isl)+'.fits')
     peaks_fitsname = os.path.join(tile_dir_in_memory, 'peaks_'+str(isl)+'.fits')
@@ -1711,16 +1779,25 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         map2fits(
             xycat_fi, wazp_cfg, tile, zpslices['zsl'], cosmo_params, xycat_fi_fitsname
         )
+        # Timer for mr_filter
+        mr_filter_start = time.time()
         run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_cfg)
+        mr_filter_end = time.time()
+        print('Time for mr_filter in slice', isl, 'is:', mr_filter_end-mr_filter_start)
+
     wmap_data = fits2map(wmap_fitsname)
+    
     rap0, decp0, ip0, jp0 = wmap2peaks(
         wmap_fitsname, wazp_cfg, tile, zpslices['zsl'], cosmo_params
     )
+    
     rap, decp, ip, jp = filter_peaks(
         tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
         rap0, decp0, ip0, jp0
     ) # to keep inner tile peaks
+    
     wradius_mpc = wave_radius(wmap_data, ip.astype(int), jp.astype(int), wazp_cfg)
+
     coverfrac = coverfrac_disc(
         rap, decp, 
         dat_footprint, footprint, 
@@ -1803,7 +1880,9 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     #data_bkg = bkg_tile (data_gal_tile, data_fp_tile, galcat, footprint, 
     #                     zpslices, mstar_file, wazp_cfg, cosmo_params, wazp_cfg['dmag_det'], 'lum')
 
+
     Nclusters = 0
+
     if not os.path.isfile(
             os.path.join(
                 out_paths['workdir_loc'], out_paths['wazp']['results'], 
@@ -1812,37 +1891,20 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     ):
         peaks_list = []
         npeaks_tot = 0
+        slice_results = []
+        
         for isl in range (0, len(zpslices)):
-            if not os.path.isfile(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    )
-            ):
-                print ('.............. Detection in slice ', isl)
-                wazp_tile_slice_start = time.time()
-                data_peaks = wazp_tile_slice(
-                    tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
-                    zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
-                    out_paths, verbose)
-                wazp_tile_slice_end = time.time()
-                print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', wazp_tile_slice_end - wazp_tile_slice_start)
-                np.save(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    ), data_peaks
-                )
-                npeaks_tot += len(data_peaks)
-            else:
-                print ('.............. Use existing detections in slice ', isl)
-                data_peaks = np.load(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    )
-                )
-                npeaks_tot += len(data_peaks)
+
+            slice_results.append(process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
+                zpslices, gbkg, zp_metrics, mstar_file, 
+                wazp_cfg, clcat, cosmo_params, out_paths, verbose))
+
+        outputs_slices = [r.result() for r in slice_results]
+        # print(outputs_slices)
+        
+        for data_peaks in outputs_slices:
+
+            npeaks_tot += len(data_peaks)
             peaks_list.append(data_peaks)        
 
         if npeaks_tot>0:
@@ -1859,6 +1921,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
 
             if data_cylinders is not None:    
                 print ('..........Start cylinders_2_clusters')
+                start_c2c = time.time()
                 data_clusters0 = cylinders2clusters(
                     zpslices, wazp_cfg, tile_specs, clcat, data_cylinders, 
                     mstar_file, cosmo_params, 
@@ -1876,6 +1939,8 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                         out_paths['workdir_loc'], out_paths['wazp']['results'], 
                         "clusters0.fits"
                     ), overwrite=True)
+                end_c2c = time.time()
+                print('Time for cylinders2clusters:', end_c2c-start_c2c)
         
         else:
             data_clusters0 = None
@@ -1909,7 +1974,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     
     return data_clusters, tile_info 
 
-
+# @python_app
 def run_wazp_tile(config, dconfig, thread_id):
     # read config file
     with open(config) as fstream:

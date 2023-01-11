@@ -107,6 +107,15 @@ run_wazp_all_tile_start = time.time()
 for ith in np.unique(all_tiles['thread_id']): 
     run_wazp_tile(config, dconfig, ith)
 
+# Call python app in a for loop
+# tile_results = []
+# for ith in np.unique(all_tiles['thread_id']): 
+
+    # tile_results.append(run_wazp_tile(config, dconfig, ith))
+
+# outputs_tiles = [r.result() for r in tile_results]
+# print(outputs_tiles)
+
 run_wazp_all_tile_end = time.time()
 print('Total Time all Tiles: ', (run_wazp_all_tile_end - run_wazp_all_tile_start))
 
