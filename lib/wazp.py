@@ -77,7 +77,7 @@ def get_in_memory_directory(tiledir=None):
     If tiledir is passed, assume it represents the path workdir/tiles/<tile_dirname>,
     and return /run/user/$UID/wazp_in_mem/<tile_dirname>.
     """
-    in_mem_dir = os.path.join('/run', 'user', str(os.getuid()), 'wazp_in_mem')
+    in_mem_dir = os.path.join('/dev/shm', 'wazp_in_mem')
     if tiledir is None:
         # /run/user/$UID/wazp_in_mem
         return in_mem_dir
