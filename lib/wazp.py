@@ -35,24 +35,9 @@ from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
 from .utils import add_clusters_unique_id, create_tile_specs
 from .utils import hpx_degrade
 
-# IMPORT FOR PARSL
-import parsl
-from parsl.app.app import join_app, python_app
-from parsl.config import Config
-from parsl.executors.threads import ThreadPoolExecutor
 
-local_threads = Config(
-    executors=[
-        ThreadPoolExecutor(
-            max_threads=12,
-            label='local_threads'
-        )
-    ]
-)
+from parsl import python_app
 
-parsl.clear()
-parsl.load(local_threads)
-# parsl.load()
 
 def tile_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
@@ -77,7 +62,8 @@ def get_in_memory_directory(tiledir=None):
     If tiledir is passed, assume it represents the path workdir/tiles/<tile_dirname>,
     and return /run/user/$UID/wazp_in_mem/<tile_dirname>.
     """
-    in_mem_dir = os.path.join('/dev/shm', 'wazp_in_mem')
+    # in_mem_dir = os.path.join('/dev/shm', 'wazp_in_mem')
+    in_mem_dir = os.path.join('/scratch/eubd/rocio.coz2/', 'tiles_slices') 
     if tiledir is None:
         # /run/user/$UID/wazp_in_mem
         return in_mem_dir
@@ -705,6 +691,9 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
     smin = int(round(math.log10(scale_min_pix)/math.log10(2.)))
     smax = int(round(math.log10(scale_max_pix)/math.log10(2.)))
     print('Run forrest run!')
+
+    mr_filter_env = os.environ.copy()
+    mr_filter_env['OMP_NUM_THREADS']='0'
 
     if smin == 0:
         subprocess.run((
@@ -1705,7 +1694,7 @@ def process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprin
             zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
             out_paths, verbose)
         wazp_tile_slice_end = time.time()
-        print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', wazp_tile_slice_end - wazp_tile_slice_start)
+        print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', (wazp_tile_slice_end - wazp_tile_slice_start), flush=True)
                 
         np.save(
             # Change to save in memory
@@ -1783,7 +1772,7 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         mr_filter_start = time.time()
         run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_cfg)
         mr_filter_end = time.time()
-        print('Time for mr_filter in slice', isl, 'is:', mr_filter_end-mr_filter_start)
+        print('Time for mr_filter in slice', isl, 'is:', (mr_filter_end-mr_filter_start), flush=True)
 
     wmap_data = fits2map(wmap_fitsname)
     
@@ -1940,7 +1929,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                         "clusters0.fits"
                     ), overwrite=True)
                 end_c2c = time.time()
-                print('Time for cylinders2clusters:', end_c2c-start_c2c)
+                print('Time for cylinders2clusters:', (end_c2c-start_c2c), flush=True)
         
         else:
             data_clusters0 = None

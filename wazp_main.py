@@ -1,3 +1,11 @@
+import parsl
+from parsl.config import Config
+from parsl.providers import LocalProvider
+from parsl.launchers import SrunLauncher
+from parsl.channels import LocalChannel
+from parsl.executors import HighThroughputExecutor
+from parsl.addresses import address_by_interface
+
 import numpy as np
 import yaml, os, sys, json
 from astropy.table import join
@@ -13,6 +21,35 @@ from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
+def load_parsl_with_slurm():
+    config = Config(
+    executors=[
+        HighThroughputExecutor(
+            label='WaZP_SD',
+            # Optional: The network interface on node 0 which compute nodes can communicate with.
+            #address=address_by_interface('ipogif0')
+            # one worker per manager / node
+            max_workers=16,
+            provider=LocalProvider(
+                channel=LocalChannel(script_dir='.'),
+                # make sure the nodes_per_block matches the nodes requested in the submit script in the next step
+                nodes_per_block=16,
+                #launcher=SrunLauncher(overrides='-c 32'),
+                launcher=SrunLauncher(),
+                cmd_timeout=120,
+                init_blocks=1,
+                max_blocks=1,
+            ),
+        )
+    ],
+    strategy=None,
+    )
+
+    parsl.load(config)
+
+load_parsl_with_slurm()
+
+wazp_init_time = time.time()
 # read config files as online arguments 
 config = sys.argv[1]
 dconfig = sys.argv[2]
@@ -105,8 +142,10 @@ print ('Run wazp in tiles')
 run_wazp_all_tile_start = time.time()
 
 for ith in np.unique(all_tiles['thread_id']): 
+    each_tile_start = time.time()
     run_wazp_tile(config, dconfig, ith)
-
+    each_tile_end = time.time()
+    print('Tile ', ith, 'time processing is:', (each_tile_end - each_tile_start), flush=True)
 # Call python app in a for loop
 # tile_results = []
 # for ith in np.unique(all_tiles['thread_id']): 
@@ -117,7 +156,7 @@ for ith in np.unique(all_tiles['thread_id']):
 # print(outputs_tiles)
 
 run_wazp_all_tile_end = time.time()
-print('Total Time all Tiles: ', (run_wazp_all_tile_end - run_wazp_all_tile_start))
+print('Total Time all Tiles: ', (run_wazp_all_tile_end - run_wazp_all_tile_start), flush=True)
 
 
 # tiles with clusters 
@@ -137,8 +176,12 @@ eff_tiles_pmem = eff_tiles_for_pmem(
 
 # Run pmem on each tile 
 print ('Pmem starts')
+pmem_start_time = time.time()
 for ith in np.unique(all_tiles['thread_id']):
+    pmem_tile_start_time = time.time()
     run_pmem_tile(config, dconfig, ith)
+    pmem_tile_end_time = time.time()
+    print('Pmem Time for Tile ', ith, 'is:', (pmem_tile_end_time - pmem_tile_start_time), flush=True)
 
 # concatenate calib_dz file 
 if pmem_cfg['calib_dz']['mode']:
@@ -165,9 +208,9 @@ official_wazp_cat(
     pmem_cfg['richness_specs'], wazp_cfg['rich_min'],
     os.path.join(workdir, 'wazp_clusters.fits')
 )
-
+pmem_end_time = time.time()
+print('Pmem and concatenate Time is:', (pmem_end_time-pmem_start_time), flush=True)
+wazp_end_time = time.time()
+print('WaZP Time Execution :', (wazp_end_time - wazp_init_time))
 print ('results in ', workdir)
 print ('all done folks !')
-
-
-
