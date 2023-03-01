@@ -1,5 +1,13 @@
 import numpy as np
 import yaml, os, sys, json
+import cProfile
+import pstats
+import io
+import pandas as pd
+from pycallgraph2 import PyCallGraph
+from pycallgraph2.output import GraphvizOutput
+
+
 from astropy.table import join
 
 from lib.multithread import split_survey
@@ -12,28 +20,17 @@ from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
-from palanteer import *
-
-#plInitAndStart("wazp_remote",server_address ="127.0.0.1")
-plInitAndStart("wazp_remote",                                   # Name of the program (mandatory)
-                   server_address  = "127.0.0.1",              # Server IP address (server=viewer or scripting module)
-                   server_port     = 59059,                    # Server port
-                   do_wait_for_server_connection = False,      # If True, this call blocks until a remote connection is established
-                   with_functions  = True,                     # If True, function entering and leaving are automatically instrumented (Python and C)
-                   with_exceptions = True,                     # If True, exception are automatically instrumented (as a log)
-                   with_memory     = True,                     # If True, the memory allocations/deallocations are traced
-                   with_gc         = True,                     # If True, garbage collection is automatically instrumented (as a lock)
-                   with_c_calls    = True                      # If True, the C calls are traced. Set it to False if builtins calls are too verbose
-                   )
-
 ## PARSL
-#import parsl
-#from parsl.app.app import python_app, bash_app
-#from parsl.configs.local_threads import config
-#from joblib import Parallel, delayed
+import parsl
+from parsl.app.app import python_app, bash_app
+from parsl.configs.local_threads import config
+from joblib import Parallel, delayed
 #import multiprocessing
 #from multiprocessing import Process
 
+
+pr = cProfile.Profile()
+pr.enable()
 
 # read config files as online arguments 
 config = sys.argv[1]
@@ -121,7 +118,18 @@ print ('Run wazp in tiles')
 for ith in np.unique(all_tiles['thread_id']):
     run_wazp_tile(config, dconfig, ith)
 
-plStopAndUninit()
+pr.disable()
+result = io.StringIO()
+pstats.Stats(pr,stream=result).print_stats()
+result=result.getvalue()
+# chop the string into a csv-like buffer
+result='ncalls'+result.split('ncalls')[-1]
+result='\n'.join([','.join(line.rstrip().split(None,5)) for line in result.split('\n')])
+# save it to disk
+filename="teste.csv"
+with open(filename, 'w+') as f:
+    f.write(result)
+    f.close()
 
 # tiles with clusters 
 eff_tiles = tiles_with_clusters(param_cfg['out_paths'], all_tiles)
