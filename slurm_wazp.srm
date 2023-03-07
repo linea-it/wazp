@@ -1,0 +1,60 @@
+#!/bin/bash
+
+#SBATCH --nodes=1           #Numero de Nós
+
+#SBATCH --ntasks-per-node=24 #Numero de tarefas por Nó
+
+#SBATCH --ntasks=24          #Numero de tarefas
+
+#SBATCH -p cpu_small              #Fila (partition) a ser utilizada
+
+#SBATCH -J wazp-mem #Nome job
+
+#SBATCH --exclusive         #Utilização exclusiva dos nós durante a execução do job
+
+#Exibe os nos alocados para o Job
+
+echo $SLURM_JOB_NODELIST
+
+nodeset -e $SLURM_JOB_NODELIST
+
+cd $SLURM_SUBMIT_DIR
+
+#Carrega módulo anaconda
+source /usr/share/Modules/init/bash
+module load anaconda3/2020.11
+#conda init bash
+conda activate /scratch/eubd/app/miniconda/envs/wazp
+
+pip install healpy
+pip install parsl==1.2.0
+
+#acessa o diretório onde o script está localizado
+cd /scratch/eubd/carlos.cardoso2/wazp_memory
+export PYTHONPATH="$PWD:$PYTHONPATH"
+
+#executa o script
+python3.8 -c 'import sys; print(sys.path)'
+
+#i=1
+#j=4
+#end=8
+#while [[ $i -le $end ]]
+#do
+#    while [[ $j -le $end ]]
+#    do
+#        #echo $i
+#        #echo $j
+#        #j=$(($j+1))
+#        srun --nodes 1 python3.8 wazp_main.py wazp.cfg data.cfg $i $j &>> output_memory_parsl_$i_$j.txt
+#    done
+#    j=4
+#    i=$(($i+1))
+#done
+#python3.8 wazp_main.py wazp.cfg data.cfg &> output_memory_parsl.txt
+i=1
+j=4
+python3.8 wazp_main.py wazp.cfg data.cfg $i $j &>> output_memory_parsl_${i}_${j}.txt
+
+rm -rf /scratch/eubd/carlos.cardoso2/tiles_slices
+rm -rf /scratch/eubd/carlos.cardoso2/wazp_memory/output/*

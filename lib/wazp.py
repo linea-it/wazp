@@ -23,20 +23,7 @@ from skimage.feature import peak_local_max
 import logging 
 import yaml
 import subprocess
-
-
-## PARSL
-import parsl
-from parsl.app.app import python_app, bash_app
-from parsl.configs.local_threads import config
-#from parsl.executors import ThreadPoolExecutor
-parsl.load(config)
-#from joblib import Parallel, delayed
-import psutil
-#import cProfile, pstats, io
-#from pstats import SortKey
-import re
-
+import time
 
 from .utils import join_struct_arrays, dist_ang
 from .utils import _mstar_, makeHealpixMap, radec_window_area
@@ -47,6 +34,11 @@ from .utils import read_FitsCat, read_mosaicFitsCat_in_hpix
 from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
 from .utils import add_clusters_unique_id, create_tile_specs
 from .utils import hpx_degrade
+
+
+from parsl import python_app
+from pathlib import Path
+
 
 def tile_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
@@ -64,6 +56,24 @@ def create_wazp_directories(workdir):
     return
 
 
+def get_in_memory_directory(tiledir=None):
+    """
+    Return the path /run/user/$UID/wazp_in_mem (in-memory temp filesystem)
+
+    If tiledir is passed, assume it represents the path workdir/tiles/<tile_dirname>,
+    and return /run/user/$UID/wazp_in_mem/<tile_dirname>.
+    """
+    # in_mem_dir = os.path.join('/dev/shm', 'wazp_in_mem')
+    cwd = Path.cwd()
+    in_mem_dir = os.path.join(cwd.parent.parent , 'tiles_slices') 
+    if tiledir is None:
+        # /run/user/$UID/wazp_in_mem
+        return in_mem_dir
+    else:
+        tile_dirname = os.path.basename(os.path.normpath(tiledir))
+        return os.path.join(in_mem_dir, tile_dirname)
+
+
 def create_tile_directories(root, path): 
     """
     creates the relevant directories for writing results/plots
@@ -74,6 +84,10 @@ def create_tile_directories(root, path):
         os.mkdir(os.path.join(root, path['plots']))
     if not os.path.exists(os.path.join(root, path['files'])):
         os.mkdir(os.path.join(root, path['files']))
+
+    # create directory for tile in temp filesystem
+    tile_in_mem_dir = get_in_memory_directory(root)
+    create_directory(tile_in_mem_dir)
     return
 
 
@@ -678,7 +692,7 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
     scale_max_pix = wazp_cfg['scale_max_mpc'] * float(wazp_cfg['resolution'])
     smin = int(round(math.log10(scale_min_pix)/math.log10(2.)))
     smax = int(round(math.log10(scale_max_pix)/math.log10(2.)))
-
+    print('Run forrest run!')
 
     if smin == 0:
         subprocess.run((
@@ -709,19 +723,23 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
         ), check=True, shell=True, stdout=subprocess.PIPE).stdout
+    os.remove(filled_catimage)
     return
 
 
 def fits2map(wmap):
+    print('Function fits2map.....')
     hdulist = fits.open(wmap,ignore_missing_end=True)
     hdu = hdulist[0]
     wmap_t = hdulist[0].data
     w = wcs.WCS(hdu.header)
     wmap_data = wmap_t.T
+
     return wmap_data
 
 
 def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
+    print('Function wmap2peaks.....')
     wmap_thresh = wazp_specs['wmap_thresh']
     wmap_data = fits2map(wmap)
     w, nxy = create_wcs_at_z(wazp_specs, tile_specs, zsl, cosmo_params)
@@ -734,6 +752,7 @@ def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
     jobj = jobj0[(wmap_data[iobj0.astype(int),jobj0.astype(int)]> wmap_thresh) ]
     ra_peak, dec_peak =  w.all_pix2world(iobj,jobj,1)[0],\
                          w.all_pix2world(iobj,jobj,1)[1]
+    os.remove(wmap)
     return ra_peak, dec_peak, iobj, jobj
 
 
@@ -859,6 +878,7 @@ def add_peaks_attributes(data_peaks, dat_galcat, galcat,
                          wazp_cfg, zpslices, gbkg, 
                          mstar_file, aper_deg, cosmo_params):
 
+    
     Nbkg_rich, Lbkg_rich = gbkg['nbar_rich'], gbkg['lbar_rich']
     Nbkg_snr, Lbkg_snr = gbkg['nbar_snr'], gbkg['lbar_snr']
     sig_N =  (gbkg['nbar_snr']*(1.+gbkg['ksi2']))**0.5
@@ -1651,45 +1671,73 @@ def wave_radius(wmap_data, ip, jp, wazp_cfg):
     return radius_mpc
 
 
+@python_app
+def process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
+            zpslices, gbkg, zp_metrics, mstar_file, 
+            wazp_cfg, clcat, cosmo_params, out_paths, verbose):
+
+    tile_dir = out_paths['workdir_loc']
+    tile_dir_in_memory = get_in_memory_directory(tile_dir)
+
+    if not os.path.isfile(
+        os.path.join(
+        tile_dir_in_memory,
+        # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+        'peaks_'+str(isl)+'.npy'
+        )
+    ):
+        print ('.............. Detection in slice ', isl)
+        wazp_tile_slice_start = time.time()
+        data_peaks = wazp_tile_slice(
+            tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
+            zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
+            out_paths, verbose)
+        wazp_tile_slice_end = time.time()
+        print('Time for Tile ', tile_specs['id'], 'Slice ', isl, 'is: ', (wazp_tile_slice_end - wazp_tile_slice_start), flush=True)
+                
+        np.save(
+            # Change to save in memory
+            os.path.join(
+                tile_dir_in_memory, 
+                # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                'peaks_'+str(isl)+'.npy'
+            ), data_peaks
+        )
+    else:
+        print ('.............. Use existing detections in slice ', isl)
+        data_peaks = np.load(
+            os.path.join(
+                tile_dir_in_memory,
+                # out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                'peaks_'+str(isl)+'.npy'
+            )
+        )
+
+    return data_peaks
+
+
+
 def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
                     zpslices, gbkg, mstar_file, wazp_cfg, cosmo_params, 
                     paths, verbose):
-
-
-
-
-    isl = zpslices['id']
     
-    pinit = "disk_io_slice{}_init ".format(isl)+str(psutil.disk_io_counters())
-    pinit = re.sub(r' sdiskio',',', pinit)
-    pinit = re.sub(r'[()]','', str(pinit))
-    #print(pinit)
-    with open("psutil_wazp_tile.csv", "a") as f:
-        f.write(pinit + "\n")
-
-
-    #pr = cProfile.Profile()
-    #pr.enable()
-
+    isl = zpslices['id']                                 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
     conv_factor = cosmo.angular_diameter_distance( zpslices['zsl']) 
     xycat_fitsname = os.path.join(
         paths['workdir_loc'], paths['wazp']['files'], 
         'xycat_'+str(isl)+'.fits'
     )
-    xycat_fi_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        'xycat_fi_'+str(isl)+'.fits'
-    )
-    wmap_fitsname =  os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        'wmap_'+str(isl)+'.fits'
-    )
-    peaks_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
-        "peaks_"+str(isl)+".fits"
-    )
 
+    # Create directories and files in memory
+    tile_dir = paths['workdir_loc']    
+    tile_dir_in_memory = get_in_memory_directory(tile_dir)
+
+    xycat_fi_fitsname = os.path.join(tile_dir_in_memory, 'xycat_fi_'+str(isl)+'.fits')
+    wmap_fitsname = os.path.join(tile_dir_in_memory, 'wmap_'+str(isl)+'.fits')
+    peaks_fitsname = os.path.join(tile_dir_in_memory, 'peaks_'+str(isl)+'.fits')
+
+    
     # select objects for computing density maps 
     ra_map, dec_map, weight_map = select_galaxies_in_slice(
         dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
@@ -1719,16 +1767,25 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         map2fits(
             xycat_fi, wazp_cfg, tile, zpslices['zsl'], cosmo_params, xycat_fi_fitsname
         )
+        # Timer for mr_filter
+        mr_filter_start = time.time()
         run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_cfg)
+        mr_filter_end = time.time()
+        print('Time for mr_filter in slice', isl, 'is:', (mr_filter_end-mr_filter_start), flush=True)
+
     wmap_data = fits2map(wmap_fitsname)
+    
     rap0, decp0, ip0, jp0 = wmap2peaks(
         wmap_fitsname, wazp_cfg, tile, zpslices['zsl'], cosmo_params
     )
+    
     rap, decp, ip, jp = filter_peaks(
         tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
         rap0, decp0, ip0, jp0
     ) # to keep inner tile peaks
+    
     wradius_mpc = wave_radius(wmap_data, ip.astype(int), jp.astype(int), wazp_cfg)
+
     coverfrac = coverfrac_disc(
         rap, decp, 
         dat_footprint, footprint, 
@@ -1784,24 +1841,6 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         )
         t = Table (data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']])
         t.write(peaks_fitsname,overwrite=True)
-    
-    
-    #pend = psutil.disk_io_counters()
-    pend = "disk_io_slice{}_end ".format(isl)+str(psutil.disk_io_counters())
-    pend = re.sub(r' sdiskio',',', str(pend))
-    pend = re.sub(r'[()]','', str(pend))
-    #print(pend)
-    with open("psutil_wazp_tile.csv", "a") as f:
-        f.write(pend + "\n")
-
-
-    
-    #pr.disable()
-    #s = io.StringIO()
-    #sortby = SortKey.CUMULATIVE
-    #ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    #ps.print_stats()
-    #print("CPROFILEIO ",s.getvalue())
 
     return data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']]
 
@@ -1829,7 +1868,9 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     #data_bkg = bkg_tile (data_gal_tile, data_fp_tile, galcat, footprint, 
     #                     zpslices, mstar_file, wazp_cfg, cosmo_params, wazp_cfg['dmag_det'], 'lum')
 
+
     Nclusters = 0
+
     if not os.path.isfile(
             os.path.join(
                 out_paths['workdir_loc'], out_paths['wazp']['results'], 
@@ -1838,55 +1879,27 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     ):
         peaks_list = []
         npeaks_tot = 0
-
-
+        slice_results = []
+        
         for isl in range (0, len(zpslices)):
-            if not os.path.isfile(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    )
-            ):
-                print ('.............. Detection in slice ', isl)
-                data_peaks = wazp_tile_slice(
-                    tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
-                    zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
-                    out_paths, verbose)
-                
-                np.save(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    ), data_peaks
-                )
-                npeaks_tot += len(data_peaks)
 
+            slice_results.append(process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
+                zpslices, gbkg, zp_metrics, mstar_file, 
+                wazp_cfg, clcat, cosmo_params, out_paths, verbose))
 
-            else:
-                print ('.............. Use existing detections in slice ', isl)
-                data_peaks = np.load(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
-                        'peaks_'+str(isl)+'.npy'
-                    )
-                )
-                npeaks_tot += len(data_peaks)
-               
-                
-            peaks_list.append(data_peaks)
+        outputs_slices = [r.result() for r in slice_results]
+        # print(outputs_slices)
+        
+        for data_peaks in outputs_slices:
 
-       
+            npeaks_tot += len(data_peaks)
+            peaks_list.append(data_peaks)        
 
         if npeaks_tot>0:
             print ('..........Start cylinders')
             data_cylinders = make_cylinders(
                 peaks_list, zpslices, wazp_cfg, cosmo_params
             )
-            #####
-            #print('##########peaks_list#############')
-            #print(peaks_list)
-            #print('##########peaks_list#############')
-            #####
             if verbose >=1:
                 t = Table (data_cylinders)
                 t.write(os.path.join(
@@ -1896,6 +1909,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
 
             if data_cylinders is not None:    
                 print ('..........Start cylinders_2_clusters')
+                start_c2c = time.time()
                 data_clusters0 = cylinders2clusters(
                     zpslices, wazp_cfg, tile_specs, clcat, data_cylinders, 
                     mstar_file, cosmo_params, 
@@ -1913,6 +1927,8 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
                         out_paths['workdir_loc'], out_paths['wazp']['results'], 
                         "clusters0.fits"
                     ), overwrite=True)
+                end_c2c = time.time()
+                print('Time for cylinders2clusters:', (end_c2c-start_c2c), flush=True)
         
         else:
             data_clusters0 = None
@@ -1946,7 +1962,7 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     
     return data_clusters, tile_info 
 
-
+# @python_app
 def run_wazp_tile(config, dconfig, thread_id):
     # read config file
     with open(config) as fstream:
