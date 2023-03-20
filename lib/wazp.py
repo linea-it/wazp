@@ -39,6 +39,9 @@ from .utils import hpx_degrade
 from parsl import python_app
 from pathlib import Path
 
+import cProfile
+import pstats
+import io
 
 def tile_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
@@ -1675,7 +1678,15 @@ def wave_radius(wmap_data, ip, jp, wazp_cfg):
 def process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
             zpslices, gbkg, zp_metrics, mstar_file, 
             wazp_cfg, clcat, cosmo_params, out_paths, verbose):
-
+    from cProfile import Profile
+    from pstats import Stats
+    from io import StringIO
+    from os import getpid
+    
+    #    #start Cprofile
+    pr = Profile()
+    pr.enable()
+    
     tile_dir = out_paths['workdir_loc']
     tile_dir_in_memory = get_in_memory_directory(tile_dir)
 
@@ -1712,7 +1723,20 @@ def process_slice(isl, tile_specs, data_gal_tile, data_fp_tile, galcat, footprin
                 'peaks_'+str(isl)+'.npy'
             )
         )
-
+    # Stop Cprofile and generate csv
+    pr.disable()
+    result = StringIO()
+    Stats(pr,stream=result).print_stats()
+    result=result.getvalue()
+    # chop the string into a csv-like buffer
+    result='ncalls'+result.split('ncalls')[-1]
+    result='\n'.join([','.join(line.rstrip().split(None,5)) for line in result.split('\n')])
+    # save it to disk
+    filename= str("saida" + getpid())
+    with open(filename, 'a') as f:
+        f.write(result)
+        f.close()
+        
     return data_peaks
 
 
