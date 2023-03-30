@@ -6,42 +6,28 @@ from parsl.channels import LocalChannel
 from parsl.executors import HighThroughputExecutor
 from parsl.addresses import address_by_interface
 
-<<<<<<< HEAD
-import cProfile
-import pstats
-import io
-import pandas as pd
-
-import numpy as np
-import yaml, os, sys, json
-from astropy.table import join
-import time
-=======
 import numpy as np
 import yaml, os, sys, json, io
 from astropy.table import join
 import time
 import pstats
-#import pandas as pd
+import pandas as pd
 
 import cProfile
 
 from pycallgraph2 import PyCallGraph
 from pycallgraph2.output import GraphvizOutput
->>>>>>> c40ae87 (Cprofile)
 
 from lib.multithread import split_survey
 from lib.utils import create_directory
 from lib.utils import update_data_structure, get_footprint
 from lib.wazp import compute_zpslices, bkg_global_survey
 from lib.wazp import run_wazp_tile, wazp_concatenate
-from lib.wazp import update_config, create_wazp_directories, get_in_memory_directory
+from lib.wazp import update_config, create_wazp_directories
 from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
-<<<<<<< HEAD
-=======
 def load_parsl_with_slurm():
     config = Config(
     executors=[
@@ -73,50 +59,14 @@ load_parsl_with_slurm()
 wazp_init_time = time.time()
 
 
->>>>>>> c40ae87 (Cprofile)
 #start Cprofile
 pr = cProfile.Profile()
 pr.enable()
 
-<<<<<<< HEAD
-wazp_init_time = time.time()
-=======
 
->>>>>>> c40ae87 (Cprofile)
 # read config files as online arguments 
 config = sys.argv[1]
 dconfig = sys.argv[2]
-parsl_max_workers = int(sys.argv[3])
-parsl_nodes_per_block = int(sys.argv[4])
-
-def load_parsl_with_slurm():
-    config = Config(
-    executors=[
-        HighThroughputExecutor(
-            label='WaZP_SD',
-            # Optional: The network interface on node 0 which compute nodes can communicate with.
-            #address=address_by_interface('ipogif0')
-            # one worker per manager / node
-            max_workers=parsl_max_workers,
-            provider=LocalProvider(
-                channel=LocalChannel(script_dir='.'),
-                # make sure the nodes_per_block matches the nodes requested in the submit script in the next step
-                nodes_per_block=parsl_nodes_per_block,
-                #launcher=SrunLauncher(overrides='-c 32'),
-                launcher=SrunLauncher(),
-                cmd_timeout=120,
-                init_blocks=1,
-                max_blocks=1,
-            ),
-        )
-    ],
-    strategy=None,
-    )
-
-    parsl.load(config)
-
-load_parsl_with_slurm()
-
 
 # open config files
 with open(config) as fstream:
@@ -135,13 +85,8 @@ workdir = param_cfg['out_paths']['workdir']
 create_wazp_directories(workdir)
 
 # create in memory directory, depends on $UID
-<<<<<<< HEAD
-in_mem_dir = get_in_memory_directory()
-create_directory(in_mem_dir)
-=======
 #in_mem_dir = get_in_memory_directory()
 #create_directory(in_mem_dir)
->>>>>>> c40ae87 (Cprofile)
 
 # create required data structure if not exist and update params
 param_data = update_data_structure(param_cfg, param_data)
@@ -213,21 +158,6 @@ print ('Run wazp in tiles')
 # Measure time for run_waz_tile
 run_wazp_all_tile_start = time.time()
 
-<<<<<<< HEAD
-for ith in np.unique(all_tiles['thread_id']): 
-    each_tile_start = time.time()
-    run_wazp_tile(config, dconfig, ith)
-    each_tile_end = time.time()
-    print('Tile ', ith, 'time processing is:', (each_tile_end - each_tile_start), flush=True)
-# Call python app in a for loop
-# tile_results = []
-# for ith in np.unique(all_tiles['thread_id']): 
-
-    # tile_results.append(run_wazp_tile(config, dconfig, ith))
-
-# outputs_tiles = [r.result() for r in tile_results]
-# print(outputs_tiles)
-=======
 # for ith in np.unique(all_tiles['thread_id']): 
 #    each_tile_start = time.time()
 #    run_wazp_tile(config, dconfig, ith)
@@ -243,27 +173,9 @@ with PyCallGraph(output=GraphvizOutput()):
 
 outputs_tiles = [r.result() for r in tile_results]
 print(outputs_tiles)
->>>>>>> c40ae87 (Cprofile)
 
 run_wazp_all_tile_end = time.time()
 print('Total Time all Tiles: ', (run_wazp_all_tile_end - run_wazp_all_tile_start), flush=True)
-
-<<<<<<< HEAD
-# Stop Cprofile and generate csv
-pr.disable()
-result = io.StringIO()
-pstats.Stats(pr,stream=result).print_stats()
-result=result.getvalue()
-# chop the string into a csv-like buffer
-result='ncalls'+result.split('ncalls')[-1]
-result='\n'.join([','.join(line.rstrip().split(None,5)) for line in result.split('\n')])
-# save it to disk
-filename="teste.csv"
-with open(filename, 'w+') as f:
-    f.write(result)
-    f.close()
-=======
->>>>>>> c40ae87 (Cprofile)
 
 
 # tiles with clusters 
@@ -321,8 +233,6 @@ wazp_end_time = time.time()
 print('WaZP Time Execution :', (wazp_end_time - wazp_init_time))
 print ('results in ', workdir)
 print ('all done folks !')
-<<<<<<< HEAD
-=======
 
 # Stop Cprofile and generate csv
 pr.disable()
@@ -337,4 +247,3 @@ filename="cprofile.csv"
 with open(filename, 'w+') as f:
     f.write(result)
     f.close()
->>>>>>> c40ae87 (Cprofile)
