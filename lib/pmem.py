@@ -2736,13 +2736,17 @@ def tile_radius_pmem(admin, pmem_cfg, cosmo_params):
 def eff_tiles_for_pmem(data_cls, clcat, tiles, admin):
     flag = np.zeros(len(tiles))
     for it in range(0, len(tiles)):
-        #tile_radius_deg = tile_radius_pmem(admin['tiling'])
-        #tile_specs = create_tile_specs(
-        #    tiles[it], tile_radius_deg, admin, -1., -1., None, None
-        #)
-        data_cls_tile = filter_hpx_tile(data_cls, clcat, tiles[it]) #tile_specs)
-        if len(data_cls_tile)>0:
-            flag[it] = 1
+        for j in range(0, tiles['nhpix'][it]):
+            tile_specs = {
+                'Nside':tiles['Nside'][it],
+                'nest': tiles['nest'][it],
+                'hpix': tiles['hpix'][it][j]
+            }
+            data_cls_tile = filter_hpx_tile(
+                data_cls, clcat, tile_specs
+            )
+            if len(data_cls_tile)>0:
+                flag[it] = 1
     return tiles[flag==1]
 
 
@@ -2782,9 +2786,10 @@ def run_pmem_tile(config, dconfig, thread_id):
         create_directory(tile_dir)
         create_pmem_directories(tile_dir, out_paths['pmem'])
         out_paths['workdir_loc'] = tile_dir # local update 
-        tile_radius_deg = tile_radius_pmem(
-            admin, param_cfg['pmem_cfg'], param_cfg['cosmo_params']
-        )
+        #tile_radius_deg = tile_radius_pmem(
+        #    admin, param_cfg['pmem_cfg'], param_cfg['cosmo_params']
+        #)
+        tile_radius_deg = tiles['radius_tile_deg'][it]
         data_gal_tile = read_mosaicFitsCat_in_disc(
             galcat, tiles[it], tile_radius_deg
         )   
@@ -2795,13 +2800,28 @@ def run_pmem_tile(config, dconfig, thread_id):
             footprint, tiles[it], tile_radius_deg
         )
         tile_specs = create_tile_specs(
-            tiles[it], 
-            tile_radius_deg, admin, 
-            -1., -1., 
+            tiles[it], admin, 
+            None, None, 
             data_fp_tile, footprint
         )
-        data_cls_tile = filter_hpx_tile(data_cls, clcat, tiles[it])
-        data_cls_disc = filter_disc_tile(data_cls, clcat, tile_specs)
+
+        data_cls_disc = filter_disc_tile(data_cls, clcat, tiles[it])
+        
+        data_cls_tile = []
+        for j in range(0, tiles['nhpix'][it]):
+            tile_specs = {
+                'Nside':tiles['Nside'][it],
+                'nest': tiles['nest'][it],
+                'hpix': tiles['hpix'][it][j]
+            }
+            if j == 0:
+                data_cls_tile = filter_hpx_tile(data_cls, clcat, tile_specs)
+            else:
+                data_cls_tile = np.hstack((
+                data_cls_tile, 
+                filter_hpx_tile(data_cls, clcat, tile_specs)
+                ))
+
         print ('Nr of clusters in tile ', len(data_cls_tile))
 
 

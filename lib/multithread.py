@@ -2,8 +2,12 @@ import numpy as np
 import astropy.io.fits as fits
 import os
 
-from .utils import read_FitsCat, hpx_split_survey
-from .utils import add_key_to_fits
+
+def read_FitsCat(cat):
+    hdulist=fits.open(cat)
+    dat=hdulist[1].data
+    hdulist.close()
+    return dat
 
 
 def split_equal_nr_of_tiles_in_threads(n_threads, ntiles):
@@ -81,22 +85,3 @@ def split_equal_area_in_threads(n_threads, tiles_filename):
     thread_idsf = thread_ids + 1
 
     return n_threads, thread_idsf.astype(int)
-
-
-def split_survey(survey_footprint, footprint, admin, tiles_filename):
-
-    if not os.path.isfile(tiles_filename):
-        ntiles = hpx_split_survey(
-            survey_footprint, footprint, admin['tiling'], tiles_filename
-        )
-        n_threads, thread_ids = split_equal_area_in_threads(
-            admin['nthreads_max'], tiles_filename
-        )
-        add_key_to_fits(tiles_filename, thread_ids, 'thread_id', 'int')
-        all_tiles = read_FitsCat(tiles_filename)
-    else:
-        all_tiles = read_FitsCat(tiles_filename)
-        ntiles, n_threads = len(all_tiles), np.amax(all_tiles['thread_id']) 
-
-    print ('Ntiles / Nthreads = ', ntiles, ' / ', n_threads)
-    return all_tiles

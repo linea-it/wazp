@@ -358,11 +358,11 @@ def select_cells_from_footprint(Nside_cell, data_fp, footprint):
 
     hpix_map, frac_map = data_fp[footprint['key_pixel']],\
                          data_fp[footprint['key_frac']]
-    pix_out, pix_val = hpx_degrade(
-        hpix_map, footprint['Nside'], footprint['nest'], 
+    pix_out, frac_out = hpx_degrade(
+        hpix_map, frac_map, footprint['Nside'], footprint['nest'], 
         Nside_cell, footprint['nest']
     )
-    return pix_out[pix_val>0.99]
+    return pix_out[frac_out>0.99]
         
 
 def stats_counts_in_cells(counts, ncmax):
@@ -402,7 +402,7 @@ def counts_in_cells(ra, dec, Nside, data_fp, footprint, ncmax):
 
 
 def bkg_global_survey(galcat, footprint, tiles_filename, zpslices_filename, 
-                      admin, cosmo_params, mstar_file, wazp_cfg, output):
+                      tiling, cosmo_params, mstar_file, wazp_cfg, output):
 
     area_min = wazp_cfg['gbkg_area']
     # select galcat and associated footprint to reach some minimum area in the survey 
@@ -413,6 +413,8 @@ def bkg_global_survey(galcat, footprint, tiles_filename, zpslices_filename,
     area = tiles['eff_area_deg2'][irev]
     hpix = tiles['hpix'][irev]
 
+    print ('.... min area for bkg (deg2) = ', area_min)
+
     if np.sum(area) <= area_min:
         nt = len(area)
     else:
@@ -420,10 +422,10 @@ def bkg_global_survey(galcat, footprint, tiles_filename, zpslices_filename,
 
     for i in range(0, nt): 
         data_gal_hpix = read_mosaicFitsCat_in_hpix(
-            galcat, hpix[i], admin['Nside'],  admin['nest']
+            galcat, hpix[i], tiling['Nside'], tiling['nest']
         )   
         data_fp_hpix = read_mosaicFootprint_in_hpix(
-            footprint, hpix[i], admin['Nside'],  admin['nest']
+            footprint, hpix[i], tiling['Nside'], tiling['nest']
         )
         if i == 0:
             data_gal = np.copy(data_gal_hpix)
@@ -725,7 +727,7 @@ def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
 
 def filter_peaks(tile, zsl, cosmo_params, resolution, ra0, dec0, ip0, jp0):
 
-    if tile['hpix']>0: # not target mode
+    if tile['nhpix']>0: # not target mode
         cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
         err_mpc = (2./float(resolution))   # +/- 2 pixels around the tile 
         conv_factor = cosmo.angular_diameter_distance(zsl)
@@ -1688,7 +1690,9 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
     # build density map /  extract peaks /compute attributes and filter 
     if not os.path.isfile(wmap_fitsname):
         map2fits(
-            xycat_fi, wazp_cfg, tile, zpslices['zsl'], cosmo_params, xycat_fi_fitsname
+            xycat_fi, wazp_cfg, 
+            tile, zpslices['zsl'], 
+            cosmo_params, xycat_fi_fitsname
         )
         run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_cfg)
     wmap_data = fits2map(wmap_fitsname)
@@ -1699,7 +1703,9 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
         rap0, decp0, ip0, jp0
     ) # to keep inner tile peaks
-    wradius_mpc = wave_radius(wmap_data, ip.astype(int), jp.astype(int), wazp_cfg)
+    wradius_mpc = wave_radius(
+        wmap_data, ip.astype(int), jp.astype(int), wazp_cfg
+    )
     coverfrac = coverfrac_disc(
         rap, decp, 
         dat_footprint, footprint, 
@@ -1928,7 +1934,7 @@ def run_wazp_tile(config, dconfig, thread_id):
         create_directory(tile_dir)
         create_tile_directories(tile_dir, out_paths['wazp'])
         out_paths['workdir_loc'] = tile_dir # local update 
-        tile_radius_deg = tile_radius(admin['tiling'])
+        tile_radius_deg = tiles['radius_tile_deg'][it]
         data_gal_tile = read_mosaicFitsCat_in_disc(
             galcat, tiles[it], tile_radius_deg
         )   
@@ -1939,7 +1945,7 @@ def run_wazp_tile(config, dconfig, thread_id):
             footprint, tiles[it], tile_radius_deg
         )
         tile_specs = create_tile_specs(
-            tiles[it], tile_radius_deg, admin, 
+            tiles[it], admin, 
             None, None, 
             data_fp_tile, footprint
         )
@@ -2160,6 +2166,7 @@ def wmap_at_zcl(target, data_primary_clusters, r200_mpc, cluster_keys,
 
 def update_config(param_cfg, param_data):
 
+    input_data_structure = param_data['input_data_structure']
     workdir = param_cfg['out_paths']['workdir']
     cosmo_params = param_cfg['cosmo_params']
     survey = param_cfg['survey']
@@ -2194,6 +2201,12 @@ def update_config(param_cfg, param_data):
     param_cfg['pmem_cfg']['mag_bin_specs']['max'] = np.float64(
         int(maglim_pmem)+1
     )
+
+    param_cfg['admin']['tiling']['nest'] = input_data_structure[survey]['nest']
+    param_data['galcat'][survey]['mosaic']['Nside'] = input_data_structure[survey]['Nside']
+    param_data['galcat'][survey]['mosaic']['nest'] = input_data_structure[survey]['nest']
+    param_data['footprint'][survey]['mosaic']['Nside'] = input_data_structure[survey]['Nside']
+    param_data['footprint'][survey]['mosaic']['nest'] = input_data_structure[survey]['nest']
 
     return param_cfg, param_data
 

@@ -744,7 +744,7 @@ def survey_ra_minmax(ra):
     return ramin, ramax
 
 
-def hpx_degrade(pix_in, nside_in, nest_in, nside_out, nest_out):
+def hpx_degrade(pix_in, frac_in, nside_in, nest_in, nside_out, nest_out):
     """_summary_
 
     Args:
@@ -763,69 +763,300 @@ def hpx_degrade(pix_in, nside_in, nest_in, nside_out, nest_out):
     nsamp = (float(nside_in)/float(nside_out))**2
     return pix_out, counts.astype(float)/nsamp
 
-def hpx_split_survey (footprint_file, footprint, admin, output):
+
+def hpix_list_bary(hpix, Nside, nest):
+        ra, dec = hp.pix2ang(Nside, hpix, nest, lonlat=True)
+        dec_bary = np.mean(dec)
+        if (np.amax(ra)-np.amin(ra))>180.:
+            ra[ra>180.] = ra[ra>180.]-360.
+            ra_bary = np(ra)
+            if ra_bary<0.:
+                ra_bary = ra_bary+360.
+        else:
+            ra_bary = np.mean(ra)
+        return ra_bary, dec_bary
+
+
+def hpx_split_survey_equal_tiles (footprint_files, footprint, tiling):
     """_summary_
 
     Args:
         footprint_file (_type_): _description_
         footprint (_type_): _description_
-        admin (_type_): _description_
-        output (_type_): _description_
+        tiling (_type_): _description_
 
     Returns:
         _type_: _description_
     """
     Nside_fp  , nest_fp   = footprint['Nside'], footprint['nest']
-    Nside_tile, nest_tile = admin['Nside'], admin['nest']
+    Nside_tile, nest_tile = tiling['Nside'], tiling['nest']
 
-    dat = read_FitsCat(footprint_file)
-    hpix_map, frac_map = dat[footprint['key_pixel']], \
-                         dat[footprint['key_frac']]
+    hpix_tiles = np.array([]).astype('int')
+    frac_tiles = np.array([])
+    i=0
+    for footprint_file in footprint_files:
+        dat = read_FitsCat(footprint_file)
+        hpix_map = dat[footprint['key_pixel']]
+        frac_map = dat[footprint['key_frac']]
+        hpix_tile, frac_tile = hpx_degrade(
+            hpix_map, frac_map, Nside_fp, nest_fp, Nside_tile, nest_tile
+        )
+        hpix_tiles = np.hstack((hpix_tiles, hpix_tile))
+        frac_tiles = np.hstack((frac_tiles, frac_tile))
+        i+=1
 
-    hpix_tile, frac_tile = hpx_degrade(
-        hpix_map, Nside_fp, nest_fp, Nside_tile, nest_tile
+    frac_unique = np.zeros(len(np.unique(hpix_tiles)))
+    ra_bary = np.zeros(len(np.unique(hpix_tiles)))
+    dec_bary = np.zeros(len(np.unique(hpix_tiles)))
+    hpix_unique = np.unique(hpix_tiles)
+    for i in range(0, len(hpix_unique)):
+        frac_unique[i] = np.sum(
+            frac_tiles[np.argwhere(hpix_tiles==hpix_unique[i])]
+        )
+        dat_fp_hpix = read_mosaicFootprint_in_hpix(
+            footprint, hpix_unique[i], Nside_tile, nest_tile
+        )
+
+        ra_bary[i], dec_bary[i] = hpix_list_bary(
+            dat_fp_hpix[footprint['key_pixel']], Nside_fp, nest_fp
+        )
+    return hpix_unique, frac_unique, ra_bary, dec_bary
+
+
+def max_dist_to_parent_hpix(
+        hpix_parent, hpix, Nside_tile, nest_tile,
+        footprint, Nside_fp, nest_fp):
+
+    dat_fp_hpix = read_mosaicFootprint_in_hpix(
+        footprint, hpix, Nside_tile, nest_tile
     )
-    racen, deccen = hp.pix2ang(Nside_tile, hpix_tile, nest_tile, lonlat=True)
-    area_tile = hp.nside2pixarea(Nside_tile, degrees=True)
+    ra, dec = hp.pix2ang(
+        Nside_fp, 
+        dat_fp_hpix[footprint['key_pixel']], 
+        nest_fp, lonlat=True
+    )
+    rac_parent, decc_parent = hp.pix2ang(
+        Nside_tile, hpix_parent, nest_tile, lonlat=True
+    )
+    dist2parent_hpix = np.degrees(
+        dist_ang(ra, dec, rac_parent, decc_parent)
+        )
+    return np.amax(dist2parent_hpix)
+
+
+def hpx_split_survey (footprint, tiling, output_hpix, output):
+    """_summary_
+
+    Args:
+        footprint (_type_): _description_
+        tiling (_type_): _description_
+        output (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    fracmin = tiling['fracmin']
+    Nside_fp  , nest_fp   = footprint['Nside'], footprint['nest']
+    Nside_tile, nest_tile = tiling['Nside'], tiling['nest']
+
+    ftp_path = footprint['mosaic']['dir']
+    footprint_files = np.array(
+        [os.path.join(ftp_path, x) for x in os.listdir(ftp_path)]
+    )
+    hpix_tiles, frac_tiles, ra_bary, dec_bary = hpx_split_survey_equal_tiles(
+        footprint_files, footprint, tiling
+    )
+    racen, deccen = hp.pix2ang(Nside_tile, hpix_tiles, nest_tile, lonlat=True)
+    area_tile = hp.pixelfunc.nside2pixarea(Nside_tile, degrees=True)
 
     # tiles 
-    data_tiles = np.zeros( (len(hpix_tile)), 
+    framed_eff_area_deg2 = np.zeros(len(hpix_tiles))
+    tile_radius_deg = np.zeros(len(hpix_tiles))
+    sid = np.argsort(-frac_tiles)
+    for i in range(0, len(hpix_tiles)):
+        tile_radius_deg[i] = tile_radius(tiling, hpix_tiles[sid[i]])
+        pixels_in_disc = hp.query_disc(
+            nside=Nside_fp, nest=nest_fp, 
+            vec=hp.pixelfunc.ang2vec(
+                np.radians(90.-deccen[sid[i]]), np.radians(racen[sid[i]])
+            ),
+            radius = np.radians(tile_radius_deg[i]), 
+            inclusive=False
+        )
+        data_fp_disc = read_mosaicFootprint_in_disc(
+            footprint, {'ra': racen[sid[i]], 'dec': deccen[sid[i]]}, 
+            tile_radius_deg[i]
+        )
+
+        hpix_disc = data_fp_disc[footprint['key_pixel']]
+        frac_disc = data_fp_disc[footprint['key_frac']]
+
+        framed_eff_area_deg2[i] = np.sum(
+            frac_disc[np.isin(hpix_disc, pixels_in_disc, assume_unique=True)]
+        ) * hp.pixelfunc.nside2pixarea(Nside_fp, degrees=True)
+
+    data_tiles = np.zeros( (len(hpix_tiles)), 
                            dtype={
                                'names':(
                                    'id', 'hpix', 
                                    'ra', 'dec', 
                                    'area_deg2', 'eff_area_deg2',
-                                   'Nside', 'nest'
+                                   'framed_eff_area_deg2',
+                                   'radius_tile_deg', 
+                                   'Nside', 'nest',
+                                   'eff_ra_bary', 'eff_dec_bary'
                                ), 
                                   'formats':(
                                       'i8', 'i8', 
                                       'f8', 'f8', 
                                       'f8', 'f8', 
-                                      'i8', 'b'
+                                      'f8', 
+                                      'f8', 
+                                      'i8', 'b', 
+                                      'f8', 'f8', 
                                   ) 
                            }
     )
-    data_tiles['id'] = np.arange(len(hpix_tile))
-    data_tiles['hpix'] = hpix_tile
-    data_tiles['ra'], data_tiles['dec'] = np.around(racen,4),\
-                                          np.around(deccen,4)
+    data_tiles['id'] = np.arange(len(hpix_tiles))
+    data_tiles['hpix'] = hpix_tiles[sid]
+    data_tiles['ra'], data_tiles['dec'] = np.around(racen[sid],4),\
+                                          np.around(deccen[sid],4)
     data_tiles['area_deg2'] = np.around(area_tile,4)
-    data_tiles['eff_area_deg2'] = np.around(frac_tile*area_tile,4)
-    data_tiles['Nside'] = Nside_tile *np.ones(len(hpix_tile)).astype(int)
-    data_tiles['nest'] = len(hpix_tile)*[nest_tile]
-
+    data_tiles['eff_area_deg2'] = np.around(frac_tiles[sid]*area_tile,4)
+    data_tiles['framed_eff_area_deg2'] = np.around(framed_eff_area_deg2,4)
+    data_tiles['radius_tile_deg'] = tile_radius_deg #np.ones(len(hpix_tiles))*tile_radius_deg
+    data_tiles['Nside'] = Nside_tile #*np.ones(len(hpix_tiles)).astype(int)
+    data_tiles['nest'] = len(hpix_tiles)*[nest_tile]
+    data_tiles['eff_ra_bary'] = np.around(ra_bary[sid],4)
+    data_tiles['eff_dec_bary'] = np.around(dec_bary[sid],4)
+    
     t = Table (data_tiles)
-    t.write(output, overwrite=True)
+
+    # merge low coverage tiles 
+    frac = data_tiles['eff_area_deg2']/data_tiles['area_deg2']
+    stiles = data_tiles[np.argwhere(frac>=fracmin).T[0]]
+    rab, decb = stiles['eff_ra_bary'], stiles['eff_dec_bary']
+    assoc = np.copy(data_tiles['id'])
+    mradius_tile_deg = np.copy(tile_radius_deg)
+    flag_merge = np.zeros(len(data_tiles)).astype(int)
+
+    i=0
+    for dth in data_tiles['hpix']:
+        if frac[i]<fracmin:
+            nlist = hp.get_all_neighbours(
+                Nside_tile, 
+                dth, None, nest_tile
+            )
+            if len(nlist[np.isin(nlist, stiles['hpix'])])>=1:
+                rac, decc = hp.pix2ang(
+                    Nside_tile,
+                    dth,
+                    nest_tile, 
+                    lonlat=True
+                )
+                dist2pix = np.degrees(
+                    dist_ang(
+                        rab[np.isin(stiles['hpix'], nlist)], 
+                        decb[np.isin(stiles['hpix'], nlist)], 
+                        data_tiles['eff_ra_bary'][i], 
+                        data_tiles['eff_dec_bary'][i] 
+                    )
+                )
+
+                assoc[i] = stiles[np.isin(stiles['hpix'], nlist)]\
+                               [np.argmin(dist2pix)]['id']
+                flag_merge[i] = 1
+
+                # check if all data in merged pixel is inside radius
+                max_dist_deg = max_dist_to_parent_hpix(
+                    hpix_tiles[sid][assoc[i]], dth, Nside_tile, nest_tile,
+                    footprint, Nside_fp, nest_fp
+                )
+                mradius_tile_deg[assoc[i]] = max(
+                    mradius_tile_deg[assoc[i]], max_dist_deg
+                )                
+        i+=1
+        
+    
+    t['parent_tile'] = assoc
+    t['flag_merge'] = flag_merge
+    t.write(output_hpix, overwrite=True)
     print ('.....tile area (deg2) = ', 
-           np.round(hp.nside2pixarea(Nside_tile, degrees=True), 2)
+           np.round(hp.pixelfunc.nside2pixarea(Nside_tile, degrees=True), 2)
     )
     print ('.....effective survey area (deg2) = ', 
-           np.around(np.sum(frac_tile)*area_tile,4)
+           np.around(np.sum(frac_tiles)*area_tile,4)
     )
-    return len(data_tiles)
+    print ('.....effective number of tiles = ', 
+           len(flag_merge)-np.sum(flag_merge), ' / ', len(flag_merge)
+    )
+
+    nhpix = np.zeros(len(assoc[flag_merge==0])).astype(int)
+    eff_area_merged = np.zeros(len(assoc[flag_merge==0]))
+    disc_eff_area_deg2 = np.zeros(len(assoc[flag_merge==0]))
+    npts = 8
+    hpixi = -np.ones(npts).astype(int)
+    i = 0
+    for tt in assoc[flag_merge==0]:
+        nhpix[i] = len(data_tiles['id'][assoc==tt])
+        for j in range(0, nhpix[i]):
+            hpixi[j] = hpix_tiles[sid][assoc==tt][j]
+        if i == 0:
+            hpix_list = np.copy(hpixi)
+        else:
+            hpix_list = np.vstack((hpix_list, hpixi))
+        eff_area_merged[i] = np.sum(data_tiles['eff_area_deg2'][assoc==tt])
+
+        data_fp_tile = read_mosaicFootprint_in_disc(
+            footprint, {'ra': racen[sid][i], 'dec': deccen[sid][i]}, mradius_tile_deg[i]
+        )
+        frac_map = data_fp_tile[footprint['key_frac']]
+        disc_eff_area_deg2[i] = np.sum(frac_map) * \
+                             hp.nside2pixarea(footprint['Nside'], degrees=True)
+        i+=1
+
+    data_mtiles = np.zeros( (len(flag_merge)- np.sum(flag_merge)), 
+                           dtype={
+                               'names':(
+                                   'id', 
+                                   'ra', 'dec',
+                                   'hpix_cen',
+                                   'nhpix',
+                                   'hpix',
+                                   'Nside', 'nest', 'area_deg2',
+                                   'eff_area_deg2',
+                                   'disc_eff_area_deg2',
+                                   'radius_tile_deg'
+                               ), 
+                               'formats':(
+                                   'i8', 
+                                   'f8', 'f8',
+                                   'i8',
+                                   'i8',
+                                   str(npts)+'i8',
+                                   'i8', 'b', 'f8',
+                                   'f8', 'f8', 'f8' 
+                               )
+                           }
+                        )
+    data_mtiles['id'] = np.arange(len(flag_merge)- np.sum(flag_merge))
+    data_mtiles['ra'] = np.around(racen[sid][flag_merge==0], 4)
+    data_mtiles['dec'] = np.around(deccen[sid][flag_merge==0],4)
+    data_mtiles['hpix_cen'] = hpix_tiles[sid][flag_merge==0]
+    data_mtiles['nhpix'] = nhpix
+    data_mtiles['hpix'] = hpix_list
+    data_mtiles['Nside'] = Nside_tile 
+    data_mtiles['nest'] = len(nhpix)*[nest_tile]
+    data_mtiles['area_deg2'] = np.around(area_tile , 4)
+    data_mtiles['eff_area_deg2'] = np.around(eff_area_merged , 4)
+    data_mtiles['disc_eff_area_deg2'] = np.around(disc_eff_area_deg2 , 4)
+    data_mtiles['radius_tile_deg'] = np.around(mradius_tile_deg[flag_merge==0],4)
+    t = Table (data_mtiles)
+    t.write(output, overwrite=True)
+    return len(data_mtiles)
 
 
-def tile_radius(tiling):
+def tile_radius(tiling, hpix):
     """_summary_
 
     Args:
@@ -836,9 +1067,16 @@ def tile_radius(tiling):
     """
 
     Nside_tile = tiling['Nside']
+    nest_tile = tiling['nest']
     frame_deg = tiling['overlap_deg']
-    tile_radius = (2.*\
-                   hp.nside2pixarea(Nside_tile, degrees=True))**0.5 / 2.
+    theta, phi = hp.vec2ang(hp.boundaries(Nside_tile, hpix, 1, nest_tile).T)
+    ra, dec = np.degrees(phi), 90.-np.degrees(theta)
+    racen, deccen = hp.pix2ang(Nside_tile, hpix, nest_tile, lonlat=True)
+    dist = np.degrees(
+        dist_ang(
+            ra, dec, racen, deccen
+        ))
+    tile_radius = np.amax(dist)
     return tile_radius + frame_deg
 
 
@@ -855,7 +1093,7 @@ def disc_coverfrac(ra, dec, radius_deg, dat_footprint, footprint):
     return float(len(pixels_in_disc[ind_in])) / float(len(pixels_in_disc))
 
 
-def create_tile_specs(tile, tile_radius_deg, admin, 
+def create_tile_specs(tile, admin, 
                       search_radius, radius_unit, 
                       dat_footprint, footprint):
     """_summary_
@@ -868,10 +1106,11 @@ def create_tile_specs(tile, tile_radius_deg, admin,
     Returns:
         _type_: _description_
     """
+
     frac_map = dat_footprint[footprint['key_frac']]
     disc_eff_area_deg2 = np.sum(frac_map) * \
                          hp.nside2pixarea(footprint['Nside'], degrees=True)
-
+    tile_radius_deg = tile['radius_tile_deg']
 
     if admin['target_mode']:
         # coverfrac in  30 and 5 arcmin
@@ -881,7 +1120,8 @@ def create_tile_specs(tile, tile_radius_deg, admin,
         coverfrac_5 = disc_coverfrac(
             tile['ra'], tile['dec'], 1./12., dat_footprint, footprint
         )
-        hpix = -1
+        nhpix = 0
+        hpix = np.array([-1])
         Nside, nest = -1, None
         area_deg2 = np.round(area_ann_deg2(0., tile_radius_deg), 3)
         eff_area_deg2 = disc_eff_area_deg2
@@ -894,7 +1134,8 @@ def create_tile_specs(tile, tile_radius_deg, admin,
     else:
         coverfrac_30 = -1.
         coverfrac_5 = -1. 
-        hpix = tile['hpix']
+        nhpix = tile['nhpix']
+        hpix = tile['hpix'][0:tile['nhpix']]
         Nside, nest = admin['tiling']['Nside'], admin['tiling']['nest']
         area_deg2 = tile['area_deg2']
         eff_area_deg2 = tile['eff_area_deg2']
@@ -902,6 +1143,7 @@ def create_tile_specs(tile, tile_radius_deg, admin,
 
     tile_specs = {'id':tile['id'],
                   'ra': tile['ra'], 'dec': tile['dec'],
+                  'nhpix': nhpix,
                   'hpix': hpix,
                   'Nside': Nside,
                   'nest': nest,
