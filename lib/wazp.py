@@ -1160,7 +1160,7 @@ def plot_zhist_in_cylinder(dcyl, zin, wazp_specs, zpslices_specs, tile_specs,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(wazp_specs['rad_zdet'] / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
     magstar = _mstar_ (mstar_file, z_cyl) 
     maglim_faint = magstar + wazp_specs['dmag_zdet']
 
@@ -1345,7 +1345,7 @@ def z_local_maxima(dcyl, tile_specs, wazp_specs, zpslices_specs,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(rad_zdet_faint / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
 
     npts = int(10.*(zmax_z-zmin_z)/sig_dz[isl_mode])+1
     nw_faint, bins =  np.histogram(
