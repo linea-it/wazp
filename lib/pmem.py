@@ -932,7 +932,7 @@ def density_fct(data, datamin, datamax, npts):
     histo, bins = np.histogram(
         data, bins=npts, 
         range=(datamin,datamax), 
-        normed=None, weights=None, density=True
+        weights=None, density=True
     )
     xx = (bins[0:len(bins)-1] + bins[1:len(bins)])/2. 
     gauss_kernel = Gaussian1DKernel(2)
@@ -2749,9 +2749,9 @@ def eff_tiles_for_pmem(data_cls, clcat, tiles, admin):
 def run_pmem_tile(config, dconfig, thread_id):
     # read config file
     with open(config) as fstream:
-        param_cfg = yaml.load(fstream)
+        param_cfg = yaml.safe_load(fstream)
     with open(dconfig) as fstream:
-        param_data = yaml.load(fstream)
+        param_data = yaml.safe_load(fstream)
 
     survey, ref_filter  = param_cfg['survey'], param_cfg['ref_filter']
     maglim = param_cfg['maglim_pmem']
@@ -2852,10 +2852,10 @@ def run_pmem_tile(config, dconfig, thread_id):
 def run_pmem_list(data_cls, config, dconfig, thread_id):
     # read config file
     with open(config) as fstream:
-        param_cfg = yaml.load(fstream)
+        param_cfg = yaml.safe_load(fstream)
     globals().update(param_cfg)
     with open(dconfig) as fstream:
-        param_data = yaml.load(fstream)
+        param_data = yaml.safe_load(fstream)
     globals().update(param_data)
 
     survey, ref_filter  = param_cfg['survey'], param_cfg['ref_filter']

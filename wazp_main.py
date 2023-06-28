@@ -18,9 +18,9 @@ dconfig = sys.argv[2]
 
 # open config files
 with open(config) as fstream:
-    param_cfg = yaml.load(fstream)
+    param_cfg = yaml.safe_load(fstream)
 with open(dconfig) as fstream:
-    param_data = yaml.load(fstream)
+    param_data = yaml.safe_load(fstream)
 
 
 # log message 

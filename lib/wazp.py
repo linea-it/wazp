@@ -286,7 +286,7 @@ def pixelized_radec(ra_map, dec_map, weight_map, w, nxy):
     ymap=w.all_world2pix(ra_map,dec_map,1)[1] - 0.5
     xycat, xedges, yedges = np.histogram2d(
         np.round(xmap, 1), np.round(ymap, 1), 
-        bins=nxy, range=((0,nxy),(0,nxy)), normed=None, weights=weight_map
+        bins=nxy, range=((0,nxy),(0,nxy)), weights=weight_map
     )
     return xycat
 
@@ -1177,7 +1177,7 @@ def plot_zhist_in_cylinder(dcyl, zin, wazp_specs, zpslices_specs, tile_specs,
         zbkg, 
         bins=npts, 
         range=(zmin_z,zmax_z), 
-        normed=None, weights=None, density=None
+        weights=None, density=None
     )
         
     xx = (bins[0:len(bins)-1] + bins[1:len(bins)])/2. 
@@ -1270,7 +1270,7 @@ def plot2(dcyl, zin, wazp_specs, zpslices_specs, tile_specs, mstar_file,
     #nw_bright, bins, patches = plt.hist(ztest_bright, npts,range=(zmin_z,zmax_z), density=False,facecolor='r', alpha=0.6, label = "mag < "+str(round(maglim_bright, 2)))
     nw_bkg, bin_edges = np.histogram(
         zbkg, bins=npts, range=(zmin_z,zmax_z), 
-        normed=None, weights=None, density=None
+        weights=None, density=None
     )
         
     xx = (bins[0:len(bins)-1] + bins[1:len(bins)])/2. 
@@ -1349,11 +1349,11 @@ def z_local_maxima(dcyl, tile_specs, wazp_specs, zpslices_specs,
     npts = int(10.*(zmax_z-zmin_z)/sig_dz[isl_mode])+1
     nw_faint, bins =  np.histogram(
         ztest_faint , npts,range=(zmin_z,zmax_z), 
-        normed=None, weights=None, density=None
+        weights=None, density=None
     )
     nw_bkg, bins =  np.histogram(
         zbkg_faint  , npts,range=(zmin_z,zmax_z), 
-        normed=None, weights=None, density=None
+        weights=None, density=None
     )
     xx = (bins[0:len(bins)-1] + bins[1:len(bins)])/2. 
     smoo_faint =  convolve(nw_faint,  gauss_kernel, boundary='extend')
@@ -1889,9 +1889,9 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
 def run_wazp_tile(config, dconfig, thread_id):
     # read config file
     with open(config) as fstream:
-        param_cfg = yaml.load(fstream)
+        param_cfg = yaml.safe_load(fstream)
     with open(dconfig) as fstream:
-        param_data = yaml.load(fstream)
+        param_data = yaml.safe_load(fstream)
 
     survey, ref_filter  = param_cfg['survey'], param_cfg['ref_filter']
     maglim = param_cfg['maglim_det']
