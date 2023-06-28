@@ -1569,23 +1569,24 @@ def cl_duplicates_filtering(data_clusters_in, wazp_specs, clcat,
     Nside_tmp, nest_tmp = wazp_specs['Nside_tmp'], wazp_specs['nest_tmp']  
     clhpx = hp.ang2pix(Nside_tmp, ra, dec, nest_tmp, lonlat=True)
 
-    for i in range(0, len(zcl)-1):
-        conv_factor = cosmo.angular_diameter_distance(zcl[i])
-        radius_deg = np.degrees(dmpc / conv_factor.value)
-
-        if mode == 'tile':
-            cond = ( (np.absolute(zcl[i]-zcl[i+1:])<nsigdz*sig_dz[i])) 
-        if mode == 'survey':
-            cond = ( (np.absolute(zcl[i]-zcl[i+1:])<nsigdz*sig_dz[i])) 
-        in_cone = cond_in_disc(ra[i+1:][cond], dec[i+1:][cond], clhpx[i+1:][cond], 
-                               Nside_tmp, nest_tmp,
-                               ra[i], dec[i], radius_deg)
-
-        if (len(clid[i+1:][cond][in_cone])>0):
-            for cld in clid[i+1:][cond][in_cone]:
-                flagdp[np.argwhere(clid == cld).T[0]] = 1
-    
-    data_clusters_out = data_clusters_in[flagdp==0]
+    for i in range(0, len(data_cl)):
+        if flagdp[i] == 0:
+            conv_factor = cosmo.angular_diameter_distance(zcl[i])
+            radius_deg = np.degrees(dmpc / conv_factor.value)
+            if mode == 'tile':
+                cond = ( (np.absolute(zcl[i]-zcl)<nsigdz*sig_dz[i]) &\
+                         (clid[i]!=clid))
+            if mode == 'survey':
+                cond = ( (np.absolute(zcl[i]-zcl)<nsigdz*sig_dz[i]) &\
+                         (tile_id[i]!=tile_id)) 
+            in_cone = cond_in_disc(
+                ra[cond], dec[cond], clhpx[cond], 
+                Nside_tmp, nest_tmp,
+                ra[i], dec[i], radius_deg
+            )
+            cond[np.argwhere(cond).T[0]] = in_cone 
+            flagdp[cond] = 1
+    data_clusters_out = data_cl[flagdp==0]
     print ('              Nr. of duplicates = '+
            str(len(data_clusters_in) - len(data_clusters_out))+' / '+
            str(len(data_clusters_in)))
