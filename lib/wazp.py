@@ -747,17 +747,16 @@ def filter_peaks(tile, zsl, cosmo_params, resolution, ra0, dec0, ip0, jp0):
         ghpx4 = hp.ang2pix(
             tile['Nside'], ra0+dx, dec0-dy, tile['nest'], lonlat=True
         )
-
-        cond = ((np.isin(ghpx, tile['hpix'])) | 
-                (np.isin(ghpx1, tile['hpix'])) | (np.isin(ghpx2, tile['hpix'])) | 
-                (np.isin(ghpx3, tile['hpix'])) | (np.isin(ghpx4, tile['hpix'])))
-        ra, dec = ra0[cond], dec0[cond]
-        ip, jp =  ip0[cond],  jp0[cond]
+        cond_filter = ((np.isin(ghpx,  tile['hpix'][0:tile['nhpix']])) | 
+                       (np.isin(ghpx1, tile['hpix'][0:tile['nhpix']])) | 
+                       (np.isin(ghpx2, tile['hpix'][0:tile['nhpix']])) | 
+                       (np.isin(ghpx3, tile['hpix'][0:tile['nhpix']])) | 
+                       (np.isin(ghpx4, tile['hpix'][0:tile['nhpix']])))
     else:
         cond_filter = (np.degrees(dist_ang(ra0, dec0, tile['ra'], tile['dec'])) <= 
                        tile['radius_filter_deg'])
-        ra, dec = ra0[cond_filter], dec0[cond_filter]
-        ip, jp  = ip0[cond_filter], jp0[cond_filter]
+    ra, dec = ra0[cond_filter], dec0[cond_filter]
+    ip, jp  = ip0[cond_filter], jp0[cond_filter]
     return    ra, dec, ip, jp 
 
 
@@ -1256,7 +1255,7 @@ def plot2(dcyl, zin, wazp_specs, zpslices_specs, tile_specs, mstar_file,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(wazp_specs['rad_zdet'] / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
     magstar = _mstar_ (mstar_file, z_cyl) 
     maglim_faint = magstar + wazp_specs['dmag_zdet']
 
