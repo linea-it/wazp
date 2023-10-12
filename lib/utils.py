@@ -1138,6 +1138,100 @@ def radec_window(racen, deccen, radius):
     return ramin, ramax, decmin, decmax
 
 
+def get_boundaries(pixel, Nside, nest, ra0_crossing, ra360_crossing):
+    """
+    get the ra-dec boundaries of a healpix pixel for graphic representation 
+    """
+    ra, dec = hp.vec2ang(hp.boundaries(Nside, pixel, 1, nest).T, lonlat=True)
+    ra = ra_shift(ra, ra0_crossing, ra360_crossing)       
+    return ra, dec
+
+
+def draw_hpixels(pixels, Nside, nest, ra0_crossing, ra360_crossing, color, label):
+    i=0
+    for p in pixels[:]:
+        if i==0:
+            plt.fill(
+                *get_boundaries(p, Nside, nest, 
+                                ra0_crossing, ra360_crossing), 
+                color=color, alpha=.1,zorder=2,
+                label = label
+            )
+        else:
+            plt.fill(
+                *get_boundaries(p, Nside, nest, 
+                                ra0_crossing, ra360_crossing), 
+                color=color, alpha=.1,zorder=2
+            )
+        i+=1
+    return
+
+
+def plot_tile(
+        tile_id, hp_lab, all_hp_neigh, hpix_fits, Nside, nest, osize, outdir
+):
+
+    create_directory(os.path.join(outdir, 'tile_plots'))
+
+    hpix_fits_out = hpix_fits[np.isin(
+        hpix_fits, np.hstack((hp_lab, all_hp_neigh)), invert=True
+    )]
+    ra_core, dec_core = hp.pix2ang(
+        Nside, hp_lab, nest, lonlat=True 
+    )
+
+    racen, deccen = np.median(ra_core), np.median(dec_core)
+    if (np.std(ra_core)>100.):
+        ra_core[ra_core>=180.] = ra_core[ra_core>=180.]-360.
+        racen = np.median(ra_core)
+
+    radius = 1.+osize + 1.42*0.5*(len(hp_lab)*\
+                 hp.pixelfunc.nside2pixarea(Nside, degrees=True))**0.5
+    ramin, ramax, decmin, decmax = radec_window(racen, deccen, radius)
+    ramin_ext, ramax_ext, decmin_ext, decmax_ext = radec_window(
+        racen, deccen, radius+1.
+    )
+    
+    ra360_crossing = False
+    ra0_crossing = False
+    if ramax_ext > 360.:
+        ra360_crossing = True
+    if ramin_ext < 0.:
+        ra0_crossing = True
+
+    rai, deci = hp.pix2ang(Nside, hpix_fits_out, nest, lonlat=True)
+    rai = ra_shift(rai, ra0_crossing, ra360_crossing)       
+    mask = (rai<ramax) & (rai>ramin) & (deci<decmax) & (deci>decmin)
+    hpix_all = hp.ang2pix(Nside, rai[mask], deci[mask], nest, lonlat=True)
+
+    plt.clf()
+    fig, ax = plt.subplots()
+    ax.set_aspect(1./np.cos(np.radians(deccen)))
+
+    # plot pixels of tile core
+    draw_hpixels(
+        hp_lab, Nside, nest, ra0_crossing, ra360_crossing, 'r', 'Core'
+    )
+    # plot pixels of tile overlap
+    draw_hpixels(
+        all_hp_neigh, Nside, nest, ra0_crossing, ra360_crossing, 'g', 'Overlap'
+    )
+    # plot pixels of surrounding survey pixels
+    draw_hpixels(
+        hpix_all, Nside, nest, ra0_crossing, ra360_crossing, 'b', 'Survey'
+    )
+    
+    plt.title('Tile '+str(tile_id))
+    plt.xlabel('R.A. [deg]', fontsize=20)
+    plt.ylabel('Dec. [deg]', fontsize=20)
+    plt.axis((ramin, ramax, decmin, decmax))
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(outdir, 'tile_plots','tile_'+str(tile_id)+'.png'))
+    plt.close()
+    return
+
+
 def disc_coverfrac(ra, dec, radius_deg, dat_footprint, footprint):
     pixels_in_disc = hp.query_disc(
         nside = footprint['Nside'], 
