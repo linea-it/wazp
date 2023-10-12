@@ -1245,9 +1245,8 @@ def disc_coverfrac(ra, dec, radius_deg, dat_footprint, footprint):
     return float(len(pixels_in_disc[ind_in])) / float(len(pixels_in_disc))
 
 
-def create_tile_specs(tile, admin, 
-                      search_radius, radius_unit, 
-                      dat_footprint, footprint):
+def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
+                      search_radius, radius_unit):
     """_summary_
 
     Args:
@@ -1259,11 +1258,6 @@ def create_tile_specs(tile, admin,
         _type_: _description_
     """
 
-    frac_map = dat_footprint[footprint['key_frac']]
-    disc_eff_area_deg2 = np.sum(frac_map) * \
-                         hp.nside2pixarea(footprint['Nside'], degrees=True)
-    tile_radius_deg = tile['radius_tile_deg']
-
     if admin['target_mode']:
         # coverfrac in  30 and 5 arcmin
         coverfrac_30 = disc_coverfrac(
@@ -1272,8 +1266,8 @@ def create_tile_specs(tile, admin,
         coverfrac_5 = disc_coverfrac(
             tile['ra'], tile['dec'], 1./12., dat_footprint, footprint
         )
-        nhpix = 0
-        hpix = np.array([-1])
+        hpix_core = np.array([-1])
+        hpix_tile = np.array([-1])
         Nside, nest = -1, None
         area_deg2 = np.round(area_ann_deg2(0., tile_radius_deg), 3)
         eff_area_deg2 = disc_eff_area_deg2
@@ -1286,8 +1280,8 @@ def create_tile_specs(tile, admin,
     else:
         coverfrac_30 = -1.
         coverfrac_5 = -1. 
-        nhpix = tile['nhpix']
-        hpix = tile['hpix'][0:tile['nhpix']]
+        hpix_core = hpix_core_list 
+        hpix_tile = hpix_tile_list 
         Nside, nest = admin['tiling']['Nside'], admin['tiling']['nest']
         area_deg2 = tile['area_deg2']
         eff_area_deg2 = tile['eff_area_deg2']
@@ -1295,8 +1289,8 @@ def create_tile_specs(tile, admin,
 
     tile_specs = {'id':tile['id'],
                   'ra': tile['ra'], 'dec': tile['dec'],
-                  'nhpix': nhpix,
-                  'hpix': hpix,
+                  'hpix_tile': hpix_tile,
+                  'hpix_core': hpix_core,
                   'Nside': Nside,
                   'nest': nest,
                   'area_deg2': area_deg2,
