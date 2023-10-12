@@ -34,14 +34,30 @@ from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
 from .utils import add_clusters_unique_id, create_tile_specs
 from .utils import hpx_degrade
 
+
+def store_wazp_confs(workdir, param_cfg, param_data):
+    with open(
+            os.path.join(workdir, 'config', 'wazp.cfg'), 'w'
+    ) as outfile:
+        json.dump(param_cfg, outfile)
+    config = os.path.join(workdir, 'config', 'wazp.cfg')    
+    with open(
+            os.path.join(workdir, 'config', 'data.cfg'), 'w'
+    ) as outfile:
+        json.dump(param_data, outfile)
+    dconfig = os.path.join(workdir, 'config', 'data.cfg')   
+    return config, dconfig
+
+
 def tile_dir_name(workdir, tile_nr):
-    return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
+    return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(5))
 
 
 def create_wazp_directories(workdir):
 
     create_directory(workdir)
     create_directory(os.path.join(workdir, 'tiles'))
+    create_directory(os.path.join(workdir, 'sky_partition'))
     create_directory(os.path.join(workdir, 'gbkg'))
     create_directory(os.path.join(workdir, 'calib'))
     create_directory(os.path.join(workdir, 'footprint'))
@@ -215,7 +231,9 @@ def bkg_tile (dat_galcat, dat_footprint, galcat, footprint,
 
 def create_wcs_at_z(wazp_cfg, tile_specs, z, cosmo_params):
 
-    cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
+    cosmo = flat(
+        H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0']
+    )
     racen, deccen = tile_specs['ra'], tile_specs['dec']
     pix_mpc = 1./float(wazp_cfg['resolution'])
     conv_factor = cosmo.angular_diameter_distance(z)# radian*conv=mpc    
@@ -233,17 +251,21 @@ def create_wcs_at_z(wazp_cfg, tile_specs, z, cosmo_params):
     return w, nxy
 
 
-def vmap_from_hpx (dat_hpx, footprint, tile_specs, wazp_cfg, cosmo_params, zsl):
+def vmap_from_hpx (dat_hpx, footprint, tile_specs, wazp_cfg, 
+                   cosmo_params, zsl):
 
     Nside, nest = footprint['Nside'], footprint['nest']
     hpx = dat_hpx[footprint['key_pixel']]
 
     # build vmap image header
-    wvmap, nxy = create_wcs_at_z(wazp_cfg, tile_specs, zsl, cosmo_params)
+    wvmap, nxy = create_wcs_at_z(
+        wazp_cfg, tile_specs, zsl, cosmo_params
+    )
     vmap = np.zeros((nxy,nxy))
 
     # convert vmap pixels to RA DEC 
-    ix, iy = np.linspace(0,nxy-1,nxy).astype(int), np.linspace(0,nxy-1,nxy).astype(int)
+    ix, iy = np.linspace(0,nxy-1,nxy).astype(int), \
+             np.linspace(0,nxy-1,nxy).astype(int)
     xv0, yv0 = np.meshgrid (ix, iy)
     xvr0, yvr0 = np.ravel(xv0), np.ravel(yv0)
     ra_map0, dec_map0 = wvmap.all_pix2world(xvr0+0.5,yvr0+0.5,1)[0],\
@@ -269,14 +291,18 @@ def map_detlum_weight(mag, mstar, wazp_cfg):
 
     weight = np.ones(len(mag))
     if wazp_cfg['map_lum_weight_mode'] == True:
-        weight = detlum_weight(mag, mstar, wazp_cfg['lum_weight_map_power'])
+        weight = detlum_weight(
+            mag, mstar, wazp_cfg['lum_weight_map_power']
+        )
     return weight
 
 def map_lum_weight(mag, mstar, wazp_cfg):
 
     weight = np.ones(len(mag))
     if wazp_cfg['map_lum_weight_mode'] == True:
-        weight = lum_weight(mag, mstar, wazp_cfg['lum_weight_map_power'])
+        weight = lum_weight(
+            mag, mstar, wazp_cfg['lum_weight_map_power']
+        )
     return weight
 
 
@@ -725,10 +751,15 @@ def wmap2peaks(wmap, wazp_specs, tile_specs, zsl, cosmo_params):
     return ra_peak, dec_peak, iobj, jobj
 
 
-def filter_peaks(tile, zsl, cosmo_params, resolution, ra0, dec0, ip0, jp0):
+def filter_peaks(
+        admin, tile, zsl, cosmo_params, resolution, 
+        ra0, dec0, ip0, jp0):
 
-    if tile['nhpix']>0: # not target mode
-        cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
+    if not admin['target_mode']: 
+        cosmo = flat(
+            H0=cosmo_params['H'], 
+            Om0=cosmo_params['omega_M_0']
+        )
         err_mpc = (2./float(resolution))   # +/- 2 pixels around the tile 
         conv_factor = cosmo.angular_diameter_distance(zsl)
         err_deg = np.degrees( err_mpc/ conv_factor.value)
@@ -749,14 +780,15 @@ def filter_peaks(tile, zsl, cosmo_params, resolution, ra0, dec0, ip0, jp0):
         ghpx4 = hp.ang2pix(
             tile['Nside'], ra0+dx, dec0-dy, tile['nest'], lonlat=True
         )
-        cond_filter = ((np.isin(ghpx,  tile['hpix'][0:tile['nhpix']])) | 
-                       (np.isin(ghpx1, tile['hpix'][0:tile['nhpix']])) | 
-                       (np.isin(ghpx2, tile['hpix'][0:tile['nhpix']])) | 
-                       (np.isin(ghpx3, tile['hpix'][0:tile['nhpix']])) | 
-                       (np.isin(ghpx4, tile['hpix'][0:tile['nhpix']])))
+        cond_filter = ((np.isin(ghpx,  tile['hpix_core'])) | 
+                       (np.isin(ghpx1, tile['hpix_core'])) | 
+                       (np.isin(ghpx2, tile['hpix_core'])) | 
+                       (np.isin(ghpx3, tile['hpix_core'])) | 
+                       (np.isin(ghpx4, tile['hpix_core'])))
     else:
-        cond_filter = (np.degrees(dist_ang(ra0, dec0, tile['ra'], tile['dec'])) <= 
-                       tile['radius_filter_deg'])
+        cond_filter = (np.degrees(dist_ang(
+            ra0, dec0, tile['ra'], tile['dec']
+        )) <= tile['radius_filter_deg'])
     ra, dec = ra0[cond_filter], dec0[cond_filter]
     ip, jp  = ip0[cond_filter], jp0[cond_filter]
     return    ra, dec, ip, jp 
@@ -1927,7 +1959,7 @@ def run_wazp_tile(config, dconfig, thread_id):
     for it in range(0, len(tiles)):
         tile_dir = os.path.join(
             workdir, 'tiles', 
-            'tile_'+str(int(tiles['id'][it])).zfill(3)
+            'tile_'+str(int(tiles['id'][it])).zfill(5)
         )
         print ('..... Tile ', int(tiles['id'][it]))
 
@@ -2122,8 +2154,10 @@ def official_wazp_cat(data_cl, clkeys, richness_specs, rich_min, wazp_file):
     return
 
 
-def wmap_at_zcl(target, data_primary_clusters, r200_mpc, cluster_keys, 
-                wazp_specs, tile_specs, zpslices_specs, cosmo_params, 
+def wmap_at_zcl(target, data_primary_clusters, r200_mpc, 
+                cluster_keys, 
+                wazp_specs, tile_specs, zpslices_specs, 
+                cosmo_params, 
                 dat_footprint, hpx_meta, dat_galcat, galcat_keys, 
                 mstar_filename, workdir, path_outputs, path):
     
@@ -2149,16 +2183,21 @@ def wmap_at_zcl(target, data_primary_clusters, r200_mpc, cluster_keys,
             'zsl_max': zcl[i] + 2.*fsig(zcl[i])
                  }
         ra_map, dec_map, weight_map = select_galaxies_in_slice(
-            dat_galcat, galcat_keys, wazp_specs, zslice, mstar_filename, 
+            dat_galcat, galcat_keys, 
+            wazp_specs, zslice, mstar_filename, 
             wazp_specs['dmag_det'], 'detlum'
         )
         xycat_fi = compute_catimage(
             ra_map, dec_map, weight_map, 
             zslice, wazp_specs, tile_specs, cosmo_params
         ) 
-        map2fits(xycat_fi, wazp_specs, tile_specs, zcl[i], cosmo_params, 
-                 xycat_fi_fitsname)
-        run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_specs) 
+        map2fits(
+            xycat_fi, wazp_specs, tile_specs, zcl[i], cosmo_params, 
+            xycat_fi_fitsname
+        )
+        run_mr_filter(
+            xycat_fi_fitsname, wmap_fitsname, wazp_specs
+        ) 
         wmap_list.append(wmap_fitsname)
 
     return wmap_list
@@ -2197,16 +2236,22 @@ def update_config(param_cfg, param_data):
     param_cfg['maglim_pmem'] = np.float64(maglim_pmem)
 
     # zmax is set to allow pmem to work on all wazp detections 
-    param_cfg['pmem_cfg']['global_conditions']['zcl_max'] = np.float64(zmax+0.2)
+    param_cfg['pmem_cfg']['global_conditions']['zcl_max'] = \
+        np.float64(zmax+0.2)
     param_cfg['pmem_cfg']['mag_bin_specs']['max'] = np.float64(
         int(maglim_pmem)+1
     )
 
-    param_cfg['admin']['tiling']['nest'] = input_data_structure[survey]['nest']
-    param_data['galcat'][survey]['mosaic']['Nside'] = input_data_structure[survey]['Nside']
-    param_data['galcat'][survey]['mosaic']['nest'] = input_data_structure[survey]['nest']
-    param_data['footprint'][survey]['mosaic']['Nside'] = input_data_structure[survey]['Nside']
-    param_data['footprint'][survey]['mosaic']['nest'] = input_data_structure[survey]['nest']
+    param_cfg['admin']['tiling']['nest'] = \
+        input_data_structure[survey]['nest']
+    param_data['galcat'][survey]['mosaic']['Nside'] = \
+        input_data_structure[survey]['Nside']
+    param_data['galcat'][survey]['mosaic']['nest'] = \
+        input_data_structure[survey]['nest']
+    param_data['footprint'][survey]['mosaic']['Nside'] = \
+        input_data_structure[survey]['Nside']
+    param_data['footprint'][survey]['mosaic']['nest'] = \
+        input_data_structure[survey]['nest']
 
     return param_cfg, param_data
 
