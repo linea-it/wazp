@@ -11,6 +11,7 @@ from lib.wazp import compute_zpslices, bkg_global_survey
 from lib.wazp import run_wazp_tile, wazp_concatenate
 from lib.wazp import update_config, create_wazp_directories
 from lib.wazp import tiles_with_clusters, official_wazp_cat
+from lib.wazp import store_wazp_confs
 from lib.pmem import run_pmem_tile, pmem_concatenate_tiles
 from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
@@ -25,23 +26,23 @@ with open(dconfig) as fstream:
     param_data = yaml.safe_load(fstream)
 globals().update(param_data)
 
-# log message 
-print ('WaZP run on survey = ', param_cfg['survey'])
-print ('....... ref filter = ', param_cfg['ref_filter'])
-print ('Workdir = ', param_cfg['out_paths']['workdir'])
-
 # create directory structure 
+survey = param_cfg['survey']
 workdir = param_cfg['out_paths']['workdir']
 create_wazp_directories(workdir)
 
-# update param_data 
-# update config (ref_filter, etc.)
+# log message 
+print ('WaZP run on survey = ', survey)
+print ('....... ref filter = ', param_cfg['ref_filter'])
+print ('Workdir = ', workdir)
+
+
+# update param_data & config (ref_filter, etc.)
 param_cfg, param_data = update_config(param_cfg, param_data)
 
 # create required data structure if not exist and update params
-#param_data = update_data_structure(param_cfg, param_data)
-survey = param_cfg['survey']
 if not input_data_structure[survey]['footprint_hpx_mosaic']:
+    print ('create footprint mosaic')
     create_mosaic_footprint(
         footprint[survey], os.path.join(workdir, 'footprint')
     )
@@ -50,16 +51,7 @@ if not input_data_structure[survey]['footprint_hpx_mosaic']:
     )
 
 # store config file in workdir
-with open(
-        os.path.join(workdir, 'config', 'wazp.cfg'), 'w'
-) as outfile:
-    json.dump(param_cfg, outfile)
-config = os.path.join(workdir, 'config', 'wazp.cfg')    
-with open(
-        os.path.join(workdir, 'config', 'data.cfg'), 'w'
-) as outfile:
-    json.dump(param_data, outfile)
-dconfig = os.path.join(workdir, 'config', 'data.cfg')    
+config, dconfig = store_wazp_confs(workdir, param_cfg, param_data)
 
 # useful keys 
 admin = param_cfg['admin']
@@ -79,23 +71,19 @@ cosmo_params = param_cfg['cosmo_params']
 ref_filter = param_cfg['ref_filter']
 clusters = param_cfg['clusters']
 
-# split_area:
-if not os.path.isfile(tiles_filename):
-    ntiles = hpx_split_survey(
-        footprint[survey], admin['tiling'], 
-        tiles_hpix_filename, tiles_filename
-    )
-    n_threads, thread_ids = split_equal_area_in_threads(
-        admin['nthreads_max'], 
-        tiles_filename
-    )
-    add_key_to_fits(tiles_filename, thread_ids, 'thread_id', 'int')
-    all_tiles = read_FitsCat(tiles_filename)
-else:
-    all_tiles = read_FitsCat(tiles_filename)
-    ntiles, n_threads = len(all_tiles), np.amax(all_tiles['thread_id']) 
-    thread_ids = all_tiles['thread_id']
-print ('Ntiles / Nthreads = ', ntiles, ' / ', n_threads)
+sky_partition(
+    admin['tiling'], 
+    param_data['starcat'][survey]['mosaic']['dir'],
+    param_data['footprint'][survey],
+    os.path.join(workdir, 'sky_partition')
+)
+
+n_threads, thread_ids = split_equal_area_in_threads(
+    admin['nthreads_max'], 
+    tiles_filename
+)
+all_tiles = read_FitsCat(tiles_filename)
+ntiles = len(all_tiles)
 
 # compute zp slicing 
 compute_zpslices(
