@@ -875,28 +875,267 @@ def max_dist_to_parent_hpix(
     return np.amax(dist2parent_hpix)
 
 
-def tile_radius(tiling, hpix):
-    """_summary_
+def scan_survey_ra(hpix, Nside, nest):
 
-    Args:
-        tiling (_type_): _description_
+    ra0_crossing = False
+    ra_split = 0.
 
-    Returns:
-        _type_: _description_
-    """
+    ra, dec = hp.pix2ang(
+        Nside, hpix, nest, lonlat=True 
+    )
+    size = 1.5*hp.pixelfunc.nside2pixarea(Nside, degrees=True)**0.5
+    ramin, ramax = np.amin(ra), np.amax(ra)
+    if ramin < size and 360.-ramax < size:
+        ra0_crossing = True
+        coords = np.concatenate([[ra], [dec]]).T
+        kmeans = cluster.KMeans(n_clusters=2, n_init=10)
+        kmeans.fit(coords)
+        labels = kmeans.labels_
+        ra_split = (np.amax(ra[np.argwhere(labels==0).T])+\
+                   np.amin(ra[np.argwhere(labels==1).T]))/2.
+    return ra0_crossing, ra_split
 
-    Nside_tile = tiling['Nside']
-    nest_tile = tiling['nest']
-    frame_deg = tiling['overlap_deg']
-    theta, phi = hp.vec2ang(hp.boundaries(Nside_tile, hpix, 1, nest_tile).T)
-    ra, dec = np.degrees(phi), 90.-np.degrees(theta)
-    racen, deccen = hp.pix2ang(Nside_tile, hpix, nest_tile, lonlat=True)
-    dist = np.degrees(
+
+def tile_center(hplist, Nside, nest):
+    ra0_crossing, ra_split = scan_survey_ra(hplist, Nside, nest)
+    ra, dec = hp.pix2ang(
+        Nside, hplist, nest, lonlat=True 
+    )
+    deccen = np.mean(dec)
+
+    if ra0_crossing:
+        ra[ra>ra_split] = ra[ra>ra_split] - 360.
+    racen = np.mean(ra)
+    if racen < 0.:
+        racen += 360.
+    return racen, deccen
+
+
+def tile_radius(hplist, Nside, nest):
+    racen, deccen = tile_center(hplist, Nside, nest)
+    ra, dec = hp.pix2ang(
+        Nside, hplist, nest, lonlat=True 
+    )
+    dcen = np.degrees( 
         dist_ang(
-            ra, dec, racen, deccen
-        ))
-    tile_radius = np.amax(dist)
-    return tile_radius + frame_deg
+            ra, dec, 
+            racen, deccen
+        )
+    )
+    half_pix_size = 0.5*1.45*hp.pixelfunc.nside2pixarea(
+            Nside, degrees=True
+        )**0.5
+    radius_deg = np.amax(dcen) + half_pix_size
+
+    return radius_deg
+
+
+def sky_partition(tiling, gdir, footprint, outdir):
+
+    print ('Sky partition')
+
+    tile_area = tiling['mean_area_deg2']
+    overlap_deg = tiling['overlap_deg']
+    Nside = tiling['Nside']
+    nest = tiling['nest']
+    mdir = footprint['mosaic']['dir']
+
+    # read all pixels in survey
+    raw_list = np.array(os.listdir(gdir))
+    hpix_fits = np.array(
+        [os.path.splitext(x)[0] for x in raw_list]
+    ).astype(int)
+
+    ra0_crossing, ra_split = scan_survey_ra(hpix_fits, Nside, nest)
+
+    # partition
+    if not os.path.isfile(
+            os.path.join(outdir, tiling['sky_partition_npy'])):
+        # estimate the number of tiles from the desired tile area 
+        area_pix = hp.pixelfunc.nside2pixarea(Nside, degrees=True)
+        npix = len(hpix_fits)
+        n_clusters = int(npix*area_pix/tile_area)
+        print ('Nr. of Tiles = ', n_clusters)
+
+        # partitionning with KMeans algorithm and save hpix's in npy
+        hp_ra0, hp_dec0 = hp.pix2ang(
+            Nside,
+            hpix_fits,
+            nest, 
+            lonlat=True
+        )
+
+        if ra0_crossing:
+            hp_ra0[hp_ra0>ra_split] = hp_ra0[hp_ra0>ra_split] - 360.
+        hp_ra = hp_ra0*np.cos(np.radians(hp_dec0))
+        hp_dec = hp_dec0
+        coords = np.concatenate([[hp_ra], [hp_dec]]).T
+        kmeans = cluster.KMeans(n_clusters=n_clusters, n_init=10)
+        kmeans.fit(coords)
+        labels = kmeans.labels_
+        partition=[]
+        for i in range(0, len(np.unique(labels))):
+            label = np.unique(labels)[i]
+            hp_lab = hpix_fits[np.argwhere(labels==label).T[0]]
+            partition.append(hp_lab)
+        np.save(
+            os.path.join(
+                outdir, tiling['sky_partition_npy']
+            ), np.array(partition, dtype=object)
+        )
+
+        # ra-dec plot of the partition
+        plt.clf()
+        plt.figure(figsize=(8, 8))
+        plt.scatter(
+            hp_ra0, hp_dec0, c=labels, s=5, cmap=plt.cm.nipy_spectral
+        )
+        plt.xlabel('R.A. [deg]')
+        plt.ylabel('Dec. [deg]')
+        plt.title('Sky partinioning : '+str(n_clusters)+' tiles')
+        plt.savefig(os.path.join(outdir,'partition.png'))
+
+
+    # compute the tile overlaps and save lists of hpix's in npy
+    if not os.path.isfile(os.path.join(outdir, tiling['tiles_npy'])):
+
+        # compute the number of layers for the overlap
+        N_layers = 1+int(
+            overlap_deg / hp.pixelfunc.nside2pixarea(Nside, degrees=True)**0.5
+        )
+        overlap_eff_size = N_layers*1.42*hp.pixelfunc.nside2pixarea(
+            Nside, degrees=True
+        )**0.5
+
+        partition = np.load(
+            os.path.join(outdir,tiling['sky_partition_npy']), allow_pickle=True
+        )
+        hpix_tiles = []
+        print ('Nr. of Tiles = ', len(partition))
+
+        for i in range(0, len(partition)):
+            if (i % 10) == 0:
+                print ('......Tile ',i, ' / ', len(partition))
+            hp_lab = partition[i]
+            all_hp_neigh = np.array([]).astype('int')
+            for j in range(0, N_layers):
+                hp_tile = np.hstack((hp_lab, all_hp_neigh))
+                all_hp = np.unique(
+                    np.concatenate(
+                        hp.pixelfunc.get_all_neighbours(
+                            Nside, hp_tile, nest=True
+                        )
+                    ).ravel()
+                )
+                hp_neigh_in_survey = all_hp[np.isin(all_hp, hpix_fits)]
+                hp_neigh = hp_neigh_in_survey[np.isin(
+                    hp_neigh_in_survey, hp_tile, invert=True
+                )]
+                all_hp_neigh = np.hstack((all_hp_neigh, hp_neigh))
+                if tiling['plot_tiles']:
+                    plot_tile(i, hp_lab, all_hp_neigh, hpix_fits, \
+                              Nside, nest, overlap_eff_size, outdir)
+            hpix_tiles.append(np.hstack((hp_lab, all_hp_neigh)))
+        
+        np.save(
+            os.path.join(
+                outdir,tiling['tiles_npy']
+            ), np.array(hpix_tiles, dtype=object)
+        )
+
+    # build tile fits file with effective areas racen, deccen
+    partition = np.load(
+        os.path.join(outdir,tiling['sky_partition_npy']), allow_pickle=True
+    )
+    tiles = np.load(
+        os.path.join(outdir,tiling['tiles_npy']), allow_pickle=True
+    )
+    ntiles = len(partition)
+    npix_core = np.zeros(ntiles).astype('int')
+    npix_tile = np.zeros(ntiles).astype('int')
+    area_core = np.zeros(ntiles)
+    area_tile = np.zeros(ntiles)
+    racen , deccen = np.zeros(len(partition)), np.zeros(len(partition))
+    radius_deg = np.zeros(len(partition))
+
+    for i in range(0, ntiles):
+        hp_core = partition[i]
+        hp_tile = tiles[i]
+        npix_core[i] = len(hp_core)
+        npix_tile[i] = len(hp_tile)
+        racen[i], deccen[i] = tile_center(
+            hp_tile, Nside, nest
+        )
+        radius_deg[i] = tile_radius(
+            hp_tile, Nside, nest
+        )
+            
+        for hh in hp_core:
+            hpix, hfrac = read_FitsFootprint(
+                os.path.join(mdir, str(hh)+'_footprint.fits'), footprint
+            )
+            area_core[i] += np.sum(hfrac)
+        area_core[i] = area_core[i]*\
+                       hp.pixelfunc.nside2pixarea(
+                           footprint['Nside'], degrees=True)
+        for hh in hp_tile:
+            hpix, hfrac = read_FitsFootprint(
+                os.path.join(mdir, str(hh)+'_footprint.fits'), footprint
+            )
+            area_tile[i] += np.sum(hfrac)
+        area_tile[i] = area_tile[i]*\
+                       hp.pixelfunc.nside2pixarea(
+                           footprint['Nside'], degrees=True)
+
+    # plot area distributions
+    ##
+    # write file
+    data_tiles = np.zeros( ntiles, 
+                           dtype={
+                               'names':(
+                                   'id', 
+                                   'npix_core', 'npix_tile', 
+                                   'area_core_deg2', 'area_tile_deg2',
+                                   'ra', 'dec', 'radius_deg'
+                               ),
+                               'formats':(
+                                   'i8', 
+                                   'i8', 'i8', 
+                                   'f8', 'f8',
+                                   'f8', 'f8', 'f8'
+                               )
+                           }
+    )
+    data_tiles['id'] = np.arange(ntiles)
+    data_tiles['npix_core'] = npix_core
+    data_tiles['npix_tile'] = npix_tile
+    data_tiles['area_core_deg2'] = area_core
+    data_tiles['area_tile_deg2'] = area_tile
+    data_tiles['ra'], data_tiles['dec'] = racen, deccen
+    data_tiles['radius_deg'] = radius_deg
+    t = Table(data_tiles)
+    t.write(
+        os.path.join(outdir, tiling['tiles_filename']), 
+        overwrite=True
+    )
+
+
+    return
+
+
+def ra_shift(ra, ra0_crossing, ra360_crossing):
+    if ra360_crossing:
+        ra[ra<180.] = ra[ra<180.]+360.        
+    if ra0_crossing:
+        ra[ra>180.] = ra[ra>180.]-360.        
+    return ra
+
+def radec_window(racen, deccen, radius):
+    ramin, ramax = racen - radius/np.cos(np.radians(deccen)),\
+                   racen + radius/np.cos(np.radians(deccen)), 
+    decmin, decmax = deccen - radius,\
+                     deccen + radius 
+    return ramin, ramax, decmin, decmax
 
 
 def disc_coverfrac(ra, dec, radius_deg, dat_footprint, footprint):
