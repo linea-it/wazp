@@ -1671,13 +1671,16 @@ def wave_radius(wmap_data, ip, jp, wazp_cfg):
     return radius_mpc
 
 
-def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
-                    zpslices, gbkg, mstar_file, wazp_cfg, cosmo_params, 
-                    paths, verbose):
+def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint, 
+                    galcat, footprint,
+                    zpslices, gbkg, mstar_file, wazp_cfg, 
+                    cosmo_params, paths, verbose):
     
     isl = zpslices['id']                                 
-    cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
-    conv_factor = cosmo.angular_diameter_distance( zpslices['zsl']) 
+    cosmo = flat(
+        H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0']
+    )
+    conv_factor = cosmo.angular_diameter_distance(zpslices['zsl']) 
     xycat_fitsname = os.path.join(
         paths['workdir_loc'], paths['wazp']['files'], 
         'xycat_'+str(isl)+'.fits'
@@ -1732,7 +1735,7 @@ def wazp_tile_slice(tile, dat_galcat, dat_footprint, galcat, footprint,
         wmap_fitsname, wazp_cfg, tile, zpslices['zsl'], cosmo_params
     )
     rap, decp, ip, jp = filter_peaks(
-        tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
+        admin, tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
         rap0, decp0, ip0, jp0
     ) # to keep inner tile peaks
     wradius_mpc = wave_radius(
@@ -1803,11 +1806,40 @@ def add_hpx_to_cat(data_gal, ra, dec, Nside_tmp, nest_tmp, keyname):
     t[keyname] = ghpx
     return t
 
-def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
-            zpslices, gbkg, zp_metrics, mstar_file, 
-            wazp_cfg, clcat, cosmo_params, out_paths, verbose ): 
 
-    print ('..........Start wazp tile catalog construction')
+def wazp_tile(admin, tile_specs, 
+              galcat, footprint, 
+              zp_metrics, mstar_file, 
+              wazp_cfg, clcat, cosmo_params, out_paths, verbose): 
+
+    workdir = out_paths['workdir']
+    tile_dir = os.path.join(
+        workdir, 'tiles', 'tile_'+str(int(tile_specs['id'])).zfill(5)
+    )
+    print ('..... Tile ', int(tile_specs['id']))
+
+    if os.path.isfile(os.path.join(
+            tile_dir, out_paths['gawa']['results'], "clusters.fits"
+    )):
+        return
+
+    create_directory(tile_dir)
+    create_tile_directories(tile_dir, out_paths['gawa'])
+    out_paths['workdir_loc'] = tile_dir # local update 
+
+    data_gal_tile = read_hpix_mosaicFitsCat(
+        tile_specs['hpix_tile'], 
+        starcat['mosaic']['dir']
+    )
+    data_gal_tile = data_gal_tile\
+                    [data_gal_tile[galcat['keys']['key_mag']]<=\
+                     np.float64(maglim)]
+
+    data_fp_tile = read_hpix_mosaicFootprint(
+        tile_specs['hpix_tile'], 
+        footprint['mosaic']['dir']
+    )
+
     # add hpx to galcat to speed up condition_in_disc around all detections
     data_gal_tile = add_hpx_to_cat(
         data_gal_tile, data_gal_tile[galcat['keys']['key_ra']], 
@@ -1815,11 +1847,31 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
         wazp_cfg['Nside_tmp'], wazp_cfg['nest_tmp'], 'hpx_tmp'
     )
 
+    if verbose >=2:
+        t = Table (data_gal_tile)
+        t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
+        t = Table (data_fp_tile)
+        t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
+
+
+    zpslices = read_FitsCat(
+        os.path.join(
+            workdir, param_cfg['wazp_cfg']['zpslices_filename']
+        )
+    )
+    gbkg = read_FitsCat(
+        os.path.join(
+            workdir, 'gbkg', param_cfg['wazp_cfg']['gbkg_filename']
+        )
+    )
+
     # compute mean bkg tile 
     #print ('..........Compute mean bkg in tile')
     #data_bkg = bkg_tile (data_gal_tile, data_fp_tile, galcat, footprint, 
-    #                     zpslices, mstar_file, wazp_cfg, cosmo_params, wazp_cfg['dmag_det'], 'lum')
+    #       zpslices, mstar_file, wazp_cfg, cosmo_params, 
+    #       wazp_cfg['dmag_det'], 'lum')
 
+    print ('..........Start wazp tile catalog construction')
     Nclusters = 0
     if not os.path.isfile(
             os.path.join(
@@ -1838,9 +1890,12 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
             ):
                 print ('.............. Detection in slice ', isl)
                 data_peaks = wazp_tile_slice(
-                    tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
-                    zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, cosmo_params, 
-                    out_paths, verbose)
+                    admin, 
+                    tile_specs, data_gal_tile, data_fp_tile, 
+                    galcat, footprint,
+                    zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, 
+                    cosmo_params, out_paths, verbose
+                )
                 np.save(
                     os.path.join(
                         out_paths['workdir_loc'], out_paths['wazp']['files'], 
@@ -1921,7 +1976,20 @@ def wazp_tile(tile_specs, data_gal_tile, data_fp_tile, galcat, footprint,
     tile_info['eff_area_deg2'] = tile_specs['eff_area_deg2']
     tile_info['Nclusters'] = Nclusters
     
-    return data_clusters, tile_info 
+    if data_clusters is not None:
+        t = Table (data_clusters)#, names=names)
+        t.write(
+            os.path.join(
+                tile_dir, out_paths['wazp']['results'], 
+                "clusters.fits"
+            ),overwrite=True
+        )
+        tile_info = Table(tile_info)
+        tile_info.write(os.path.join(
+            out_paths['workdir_loc'], out_paths['wazp']['results'], 
+            "tile_info.fits"
+        ), overwrite=True)
+    return 
 
 
 def run_wazp_tile(config, dconfig, thread_id):
@@ -1944,75 +2012,41 @@ def run_wazp_tile(config, dconfig, thread_id):
 
     workdir = out_paths['workdir']
     all_tiles = read_FitsCat(
-        os.path.join(workdir, admin['tiling']['tiles_filename'])
+        os.path.join(
+            workdir, 'sky_partition',
+            admin['tiling']['tiles_filename'])
     )
-    tiles = all_tiles[(all_tiles['thread_id']==int(thread_id))]    
+    idt = np.argwhere(all_tiles['thread_id']==int(thread_id)).T[0]    
+    tiles_specs = all_tiles[idt]
+    hpix_tile_lists = np.load(
+        os.path.join(
+            workdir, 'sky_partition', 
+            admin['tiling']['tiles_npy']
+        ), 
+        allow_pickle=True
+    )[idt]
+    hpix_core_lists = np.load(
+        os.path.join(
+            workdir, 'sky_partition', 
+            admin['tiling']['sky_partition_npy']
+        ), 
+        allow_pickle=True
+    )[idt]
+
     print ('THREAD ', int(thread_id))
 
-    zpslices = read_FitsCat(
-        os.path.join(workdir, param_cfg['wazp_cfg']['zpslices_filename'])
-    )
-    gbkg = read_FitsCat(
-        os.path.join(workdir, 'gbkg', param_cfg['wazp_cfg']['gbkg_filename'])
-    )
-
     for it in range(0, len(tiles)):
-        tile_dir = os.path.join(
-            workdir, 'tiles', 
-            'tile_'+str(int(tiles['id'][it])).zfill(5)
-        )
-        print ('..... Tile ', int(tiles['id'][it]))
 
-        create_directory(tile_dir)
-        create_tile_directories(tile_dir, out_paths['wazp'])
-        out_paths['workdir_loc'] = tile_dir # local update 
-        tile_radius_deg = tiles['radius_tile_deg'][it]
-        data_gal_tile = read_mosaicFitsCat_in_disc(
-            galcat, tiles[it], tile_radius_deg
-        )   
-        data_gal_tile = data_gal_tile\
-                        [data_gal_tile[galcat['keys']['key_mag']]<=\
-                         np.float64(maglim)]
-        data_fp_tile = read_mosaicFootprint_in_disc(
-            footprint, tiles[it], tile_radius_deg
-        )
         tile_specs = create_tile_specs(
-            tiles[it], admin, 
-            None, None, 
-            data_fp_tile, footprint
+            tiles_specs[it], hpix_core_lists[it], hpix_tile_lists[it], admin
         )
+        wazp_tile(
+            admin, tile_specs, 
+            galcat, footprint, 
+            zp_metrics, magstar_file, 
+            wazp_cfg, clcat, param_cfg['cosmo_params'], 
+            out_paths, param_cfg['verbose'] ) 
 
-        if param_cfg['verbose'] >=2:
-            t = Table (data_gal_tile)
-            t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
-            t = Table (data_fp_tile)
-            t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
-        
-        if not os.path.isfile(
-                os.path.join(
-                    tile_dir, out_paths['wazp']['results'], 
-                    "clusters.fits"
-                )
-        ):
-            data_clusters, tile_info = wazp_tile(
-                tile_specs, data_gal_tile, data_fp_tile, galcat, footprint, 
-                zpslices, gbkg, zp_metrics, magstar_file, 
-                wazp_cfg, clcat, param_cfg['cosmo_params'], 
-                out_paths, param_cfg['verbose'] ) 
-
-            if data_clusters is not None:
-                t = Table (data_clusters)#, names=names)
-                t.write(
-                    os.path.join(
-                        tile_dir, out_paths['wazp']['results'], 
-                        "clusters.fits"
-                    ),overwrite=True
-                )
-            tile_info = Table(tile_info)
-            tile_info.write(os.path.join(
-                out_paths['workdir_loc'], out_paths['wazp']['results'], 
-                "tile_info.fits"
-            ), overwrite=True)
     return
 
 
