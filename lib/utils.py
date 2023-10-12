@@ -11,6 +11,7 @@ from math import log, exp, atan, atanh
 from astropy.table import Table
 from scipy.optimize import least_squares
 from scipy import interpolate
+from sklearn import cluster
 
 
 
@@ -60,6 +61,36 @@ def read_FitsFootprint(hpx_footprint, hpx_meta):
     else:
         frac_map = dat[hpx_meta['key_frac']]
     return  hpix_map, frac_map
+
+
+def read_hpix_mosaicFitsCat(hpix_arr, datadir):
+
+    i = 0
+    for hh in hpix_arr:
+        datas = read_FitsCat(
+            os.path.join(datadir, str(hh)+'.fits')
+        )
+        if i == 0:
+            data = np.copy(datas)
+        else:
+            data = np.append(data, datas)
+        i+=1
+    return data
+
+
+def read_hpix_mosaicFootprint(hpix_arr, datadir):
+
+    i = 0
+    for hh in hpix_arr:
+        datas = read_FitsCat(
+            os.path.join(datadir, str(hh)+'_footprint.fits')
+        )
+        if i == 0:
+            data = np.copy(datas)
+        else:
+            data = np.append(data, datas)
+        i+=1
+    return data
 
 
 def read_mosaicFitsCat_in_disc (galcat, tile, radius_deg):
@@ -769,7 +800,7 @@ def hpix_list_bary(hpix, Nside, nest):
         dec_bary = np.mean(dec)
         if (np.amax(ra)-np.amin(ra))>180.:
             ra[ra>180.] = ra[ra>180.]-360.
-            ra_bary = np(ra)
+            ra_bary = np.mean(ra)
             if ra_bary<0.:
                 ra_bary = ra_bary+360.
         else:
