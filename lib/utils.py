@@ -14,6 +14,43 @@ from scipy import interpolate
 from sklearn import cluster
 
 
+def create_slurm_script(task, config, dconfig, narray, script):
+    slurm_cfg = config['slurm']
+
+    f = open(f"{script}", "w")
+    f.write("#!/bin/sh\n")
+    f.write(f"#SBATCH --job-name={task}\n")
+    if narray > 1:
+        f.write(
+            f"#SBATCH --cpus-per-task={slurm_cfg['cpus-per-task']}\n"
+        )
+        f.write(
+            f"#SBATCH --array=0-{narray}%{slurm_cfg['max_parallel']}\n"
+        )
+    f.write(f"#SBATCH --mem={slurm_cfg['memory'][task]}G\n")
+    if narray > 1:
+        f.write(f"python {task}.py {config} {dconfig} $SLURM_ARRAY_TASK_ID\n")
+    else:
+        f.write(f"python {task}.py  {config} {dconfig}\n")
+    f.close()
+    return 
+    
+
+def slurm_submit(task, config, dconfig, narray=1, dep=None):
+
+    if dep is not None:
+        time.sleep(3)
+
+    create_slurm_script(task, config, dconfig, narray, f"job_{task}.sh")    
+    if dep is not None:
+        cmd = f"sbatch --depend=afterany:{dep} job_{task}.sh"
+    else:
+        cmd = f"sbatch job_{task}.sh"
+
+    res = subprocess.run(cmd, shell=True, capture_output=True)
+    job_id = str(res.stdout).split("batch job ")[1].split("\\")[0]
+    return job_id
+
 
 def create_directory(dir):
     """_summary_

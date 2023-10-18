@@ -1,14 +1,15 @@
 import numpy as np
 import yaml, os, sys, json
-from astropy.table import join
 
 from lib.multithread import split_equal_area_in_threads
 from lib.utils import sky_partition, read_FitsCat
 from lib.utils import create_mosaic_footprint
 from lib.utils import create_directory, add_key_to_fits
 from lib.utils import update_data_structure, get_footprint
+from lib.utils import slurm_submit
+
 from lib.wazp import compute_zpslices, bkg_global_survey
-from lib.wazp import run_wazp_tile, wazp_concatenate
+from lib.wazp import wazp_concatenate
 from lib.wazp import update_config, create_wazp_directories
 from lib.wazp import tiles_with_clusters, official_wazp_cat
 from lib.wazp import store_wazp_confs
@@ -35,7 +36,6 @@ create_wazp_directories(workdir)
 print ('WaZP run on survey = ', survey)
 print ('....... ref filter = ', param_cfg['ref_filter'])
 print ('Workdir = ', workdir)
-
 
 # update param_data & config (ref_filter, etc.)
 param_cfg, param_data = update_config(param_cfg, param_data)
@@ -73,13 +73,6 @@ sky_partition(
     os.path.join(workdir, 'sky_partition')
 )
 
-n_threads, thread_ids = split_equal_area_in_threads(
-    admin['nthreads_max'], 
-    tiles_filename
-)
-all_tiles = read_FitsCat(tiles_filename)
-ntiles = len(all_tiles)
-
 # compute zp slicing 
 compute_zpslices(
     param_data['zp_metrics'][survey][ref_filter], 
@@ -94,10 +87,16 @@ bkg_global_survey(
     param_data['magstar_file'][survey][ref_filter], 
     wazp_cfg, workdir)
 
-# detect clusters on all tiles 
-print ('Run wazp in tiles')
-for ith in np.unique(all_tiles['thread_id']): 
-    run_wazp_tile(config, dconfig, ith)
+
+# run detection on all tiles 
+all_tiles = read_FitsCat(tiles_filename)
+job_id1 = slurm_submit(
+    'wazp_tile', config, dconfig, slurm_cfg, len(all_tiles)
+)
+# concatenate 
+job_id2 = slurm_submit(
+    'wazp_concatenate', config, dconfig, dep=job_id1
+)
 
 
 '''
