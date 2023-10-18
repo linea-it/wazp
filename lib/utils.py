@@ -1283,9 +1283,13 @@ def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
         hpix_core = hpix_core_list 
         hpix_tile = hpix_tile_list 
         Nside, nest = admin['tiling']['Nside'], admin['tiling']['nest']
-        area_deg2 = tile['area_deg2']
-        eff_area_deg2 = tile['eff_area_deg2']
         radius_filter_deg = -1.
+
+        area_deg2 = float(tile['npix_core'])*\
+                    hp.pixelfunc.nside2pixarea(Nside, degrees=True)
+        eff_area_deg2 = tile['area_core_deg2']
+        framed_eff_area_deg2 = tile['area_tile_deg2']
+        tile_radius_deg = tile['radius_deg']
 
     tile_specs = {'id':tile['id'],
                   'ra': tile['ra'], 'dec': tile['dec'],
@@ -1295,7 +1299,7 @@ def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
                   'nest': nest,
                   'area_deg2': area_deg2,
                   'eff_area_deg2': eff_area_deg2,
-                  'disc_eff_area_deg2': disc_eff_area_deg2,
+                  'framed_eff_area_deg2': framed_eff_area_deg2,
                   'radius_tile_deg': np.round(tile_radius_deg, 3), 
                   'radius_filter_deg': np.round(radius_filter_deg, 3), 
                   'coverfrac_30arcmin': np.round(coverfrac_30, 2),

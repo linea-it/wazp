@@ -3,7 +3,7 @@ import yaml, os, sys, json
 from astropy.table import join
 
 from lib.multithread import split_equal_area_in_threads
-from lib.utils import hpx_split_survey, read_FitsCat
+from lib.utils import sky_partition, read_FitsCat
 from lib.utils import create_mosaic_footprint
 from lib.utils import create_directory, add_key_to_fits
 from lib.utils import update_data_structure, get_footprint
@@ -50,30 +50,25 @@ if not input_data_structure[survey]['footprint_hpx_mosaic']:
         workdir, 'footprint'
     )
 
-# store config file in workdir
+# store config files in workdir
 config, dconfig = store_wazp_confs(workdir, param_cfg, param_data)
 
 # useful keys 
 admin = param_cfg['admin']
 wazp_cfg = param_cfg['wazp_cfg']
 pmem_cfg = param_cfg['pmem_cfg']
-tiles_filename = os.path.join(
-    workdir, admin['tiling']['tiles_filename']
-)
-tiles_hpix_filename = os.path.join(
-    workdir, admin['tiling']['tiles_hpix_filename']
-)
-zpslices_filename = os.path.join(
-    workdir, wazp_cfg['zpslices_filename']
-)
-gbkg_filename = os.path.join(workdir, 'gbkg', wazp_cfg['gbkg_filename'])
 cosmo_params = param_cfg['cosmo_params']
 ref_filter = param_cfg['ref_filter']
 clusters = param_cfg['clusters']
+tiles_filename = os.path.join(
+    workdir, 'sky_partition', 
+    admin['tiling']['tiles_filename']
+)
 
+#
 sky_partition(
     admin['tiling'], 
-    param_data['starcat'][survey]['mosaic']['dir'],
+    param_data['galcat'][survey]['mosaic']['dir'],
     param_data['footprint'][survey],
     os.path.join(workdir, 'sky_partition')
 )
@@ -88,23 +83,24 @@ ntiles = len(all_tiles)
 # compute zp slicing 
 compute_zpslices(
     param_data['zp_metrics'][survey][ref_filter], 
-    wazp_cfg, -1., zpslices_filename
+    wazp_cfg, -1., workdir
 )
 
 # compute global bkg ppties 
-if not os.path.isfile(gbkg_filename):
-    print ('Global bkg computation')
-    bkg_global_survey(
-        param_data['galcat'][survey], param_data['footprint'][survey], 
-        tiles_hpix_filename, zpslices_filename, 
-        admin['tiling'], cosmo_params, 
-        param_data['magstar_file'][survey][ref_filter], 
-        wazp_cfg, gbkg_filename)
+print ('Global bkg computation')
+bkg_global_survey(
+    param_data['galcat'][survey], param_data['footprint'][survey], 
+    admin['tiling'], cosmo_params, 
+    param_data['magstar_file'][survey][ref_filter], 
+    wazp_cfg, workdir)
 
 # detect clusters on all tiles 
 print ('Run wazp in tiles')
 for ith in np.unique(all_tiles['thread_id']): 
     run_wazp_tile(config, dconfig, ith)
+
+
+'''
 
 # tiles with clusters 
 eff_tiles = tiles_with_clusters(param_cfg['out_paths'], all_tiles)
@@ -155,5 +151,5 @@ official_wazp_cat(
 print ('results in ', workdir)
 print ('all done folks !')
 
-
+'''
 

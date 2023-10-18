@@ -13,7 +13,7 @@ from astropy import units as u
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.ndimage as ndi
-import os
+import os, json
 import math
 from math import cos 
 import healpy as hp
@@ -32,7 +32,9 @@ from .utils import read_mosaicFitsCat_in_disc, read_mosaicFootprint_in_disc
 from .utils import read_FitsCat, read_mosaicFitsCat_in_hpix
 from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
 from .utils import add_clusters_unique_id, create_tile_specs
-from .utils import hpx_degrade
+from .utils import hpx_degrade, read_hpix_mosaicFitsCat
+from .utils import read_hpix_mosaicFootprint
+
 
 
 def store_wazp_confs(workdir, param_cfg, param_data):
@@ -79,7 +81,11 @@ def create_tile_directories(root, path):
     return
 
 
-def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, output): 
+def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir): 
+
+    output = os.path.join(
+        workdir, wazp_cfg['zpslices_filename']
+    )
 
     sig0 = np.float64(zp_metrics['sig_dz0'])
     zpmin, zpmax = np.float64(zp_metrics['zpmin']), \
@@ -427,42 +433,62 @@ def counts_in_cells(ra, dec, Nside, data_fp, footprint, ncmax):
     return  stats_counts_in_cells(counts_all, ncmax)
 
 
-def bkg_global_survey(galcat, footprint, tiles_filename, zpslices_filename, 
-                      tiling, cosmo_params, mstar_file, wazp_cfg, output):
+def bkg_global_survey(galcat, footprint, 
+                      tiling, cosmo_params, mstar_file, wazp_cfg, workdir):
+
+    # relevant paths and files 
+    tiles_filename = os.path.join(
+        workdir, 'sky_partition', 
+        tiling['tiles_filename']
+    )
+    zpslices_filename = os.path.join(
+        workdir, wazp_cfg['zpslices_filename']
+    )
+    tiles_core_npy = os.path.join(
+        workdir, 'sky_partition', 
+        tiling['sky_partition_npy']
+    )
+    gbkg_filename = os.path.join(
+        workdir, 'gbkg', 
+        wazp_cfg['gbkg_filename']
+    )
+
+    if os.path.isfile(gbkg_filename):
+        return
+
+    # load tiles 
+    hpix_core_lists = np.load(
+        os.path.join(
+            workdir, 'sky_partition', 
+            tiling['sky_partition_npy']
+        ), 
+        allow_pickle=True
+    )
 
     area_min = wazp_cfg['gbkg_area']
     # select galcat and associated footprint to reach some minimum area in the survey 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
     tiles = read_FitsCat(tiles_filename)
     zpslices = read_FitsCat(zpslices_filename)
-    irev = np.argsort(-tiles['eff_area_deg2'])
-    area = tiles['eff_area_deg2'][irev]
-    hpix = tiles['hpix'][irev]
+    irev = np.argsort(-tiles['area_core_deg2'])
+    area = tiles['area_core_deg2'][irev]
 
     print ('.... min area for bkg (deg2) = ', area_min)
-
     if np.sum(area) <= area_min:
         nt = len(area)
     else:
         nt = np.argwhere(np.cumsum(area)>area_min).T[0][0]+1
 
-    for i in range(0, nt): 
-        data_gal_hpix = read_mosaicFitsCat_in_hpix(
-            galcat, hpix[i], tiling['Nside'], tiling['nest']
-        )   
-        data_fp_hpix = read_mosaicFootprint_in_hpix(
-            footprint, hpix[i], tiling['Nside'], tiling['nest']
-        )
-        if i == 0:
-            data_gal = np.copy(data_gal_hpix)
-            data_fp =  np.copy(data_fp_hpix)
-        else:
-            data_gal = np.hstack((data_gal_hpix, data_gal))
-            data_fp  = np.hstack((data_fp_hpix, data_fp))
+    hpix = np.array([]).astype(int)
+    for ir in irev[0:nt]:
+        hpix = np.hstack((hpix, hpix_core_lists[ir]))
+
+    data_gal = read_hpix_mosaicFitsCat(hpix, galcat['mosaic']['dir'])
+    data_fp = read_hpix_mosaicFootprint(hpix, footprint['mosaic']['dir'])
 
     bkg_global(data_gal, galcat, data_fp, footprint, 
                zpslices_filename, cosmo_params, 
-               mstar_file, wazp_cfg, output)
+               mstar_file, wazp_cfg, gbkg_filename)
     return
 
 
@@ -1193,7 +1219,7 @@ def plot_zhist_in_cylinder(dcyl, zin, wazp_specs, zpslices_specs, tile_specs,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(wazp_specs['rad_zdet'] / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['framed_eff_area_deg2']
     magstar = _mstar_ (mstar_file, z_cyl) 
     maglim_faint = magstar + wazp_specs['dmag_zdet']
 
@@ -1289,7 +1315,7 @@ def plot2(dcyl, zin, wazp_specs, zpslices_specs, tile_specs, mstar_file,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(wazp_specs['rad_zdet'] / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['framed_eff_area_deg2']
     magstar = _mstar_ (mstar_file, z_cyl) 
     maglim_faint = magstar + wazp_specs['dmag_zdet']
 
@@ -1378,7 +1404,7 @@ def z_local_maxima(dcyl, tile_specs, wazp_specs, zpslices_specs,
     conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg_faint = np.degrees(rad_zdet_faint / conv_factor.value)
     area_cl_arcmin2 = 3600. * np.pi * rad_deg_faint**2
-    tile_area_arcmin2 = 3600. * tile_specs['disc_eff_area_deg2']
+    tile_area_arcmin2 = 3600. * tile_specs['framed_eff_area_deg2']
 
     npts = int(10.*(zmax_z-zmin_z)/sig_dz[isl_mode])+1
     nw_faint, bins =  np.histogram(
@@ -1774,13 +1800,13 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
 
         eff_area_mpc2 = tile['eff_area_deg2'] * \
                         (np.pi * conv_factor.value / 180.)**2
-        framed_eff_area_mpc2 = tile['disc_eff_area_deg2'] *\
+        framed_eff_area_mpc2 = tile['framed_eff_area_deg2'] *\
                                (np.pi * conv_factor.value / 180.)**2
         print ('         area mpc2 / deg2 ', 
                np.round(eff_area_mpc2, 2), np.round(tile['eff_area_deg2'], 2))
         print ('         galaxies density/arcmin2 /mpc2', 
                np.round(
-                   float(len(ra_map))/(tile['disc_eff_area_deg2']*3600.), 3
+                   float(len(ra_map))/(tile['framed_eff_area_deg2']*3600.), 3
                ),
                np.round(float(len(ra_map))/framed_eff_area_mpc2, 3))
         print ('         clusters density/mpc2 ', 
@@ -1809,7 +1835,7 @@ def add_hpx_to_cat(data_gal, ra, dec, Nside_tmp, nest_tmp, keyname):
 
 def wazp_tile(admin, tile_specs, 
               galcat, footprint, 
-              zp_metrics, mstar_file, 
+              zp_metrics, mstar_file, maglim, 
               wazp_cfg, clcat, cosmo_params, out_paths, verbose): 
 
     workdir = out_paths['workdir']
@@ -1819,17 +1845,17 @@ def wazp_tile(admin, tile_specs,
     print ('..... Tile ', int(tile_specs['id']))
 
     if os.path.isfile(os.path.join(
-            tile_dir, out_paths['gawa']['results'], "clusters.fits"
+            tile_dir, out_paths['wazp']['results'], "clusters.fits"
     )):
         return
 
     create_directory(tile_dir)
-    create_tile_directories(tile_dir, out_paths['gawa'])
+    create_tile_directories(tile_dir, out_paths['wazp'])
     out_paths['workdir_loc'] = tile_dir # local update 
 
     data_gal_tile = read_hpix_mosaicFitsCat(
         tile_specs['hpix_tile'], 
-        starcat['mosaic']['dir']
+        galcat['mosaic']['dir']
     )
     data_gal_tile = data_gal_tile\
                     [data_gal_tile[galcat['keys']['key_mag']]<=\
@@ -1856,12 +1882,12 @@ def wazp_tile(admin, tile_specs,
 
     zpslices = read_FitsCat(
         os.path.join(
-            workdir, param_cfg['wazp_cfg']['zpslices_filename']
+            workdir, wazp_cfg['zpslices_filename']
         )
     )
     gbkg = read_FitsCat(
         os.path.join(
-            workdir, 'gbkg', param_cfg['wazp_cfg']['gbkg_filename']
+            workdir, 'gbkg', wazp_cfg['gbkg_filename']
         )
     )
 
@@ -2035,15 +2061,17 @@ def run_wazp_tile(config, dconfig, thread_id):
 
     print ('THREAD ', int(thread_id))
 
-    for it in range(0, len(tiles)):
+    for it in range(0, len(tiles_specs)):
 
         tile_specs = create_tile_specs(
-            tiles_specs[it], hpix_core_lists[it], hpix_tile_lists[it], admin
+            tiles_specs[it], admin, 
+            hpix_core_lists[it], hpix_tile_lists[it],
+            None, None
         )
         wazp_tile(
             admin, tile_specs, 
             galcat, footprint, 
-            zp_metrics, magstar_file, 
+            zp_metrics, magstar_file, maglim,
             wazp_cfg, clcat, param_cfg['cosmo_params'], 
             out_paths, param_cfg['verbose'] ) 
 

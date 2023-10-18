@@ -2,6 +2,7 @@ import numpy as np
 import astropy.io.fits as fits
 import os
 
+from .utils import add_key_to_fits
 
 def read_FitsCat(cat):
     hdulist=fits.open(cat)
@@ -83,5 +84,9 @@ def split_equal_area_in_threads(n_threads, tiles_filename):
                np.round(np.amax(area_per_thread), 2))
 
     thread_idsf = thread_ids + 1
+    add_key_to_fits(
+        tiles_filename, thread_idsf.astype(int), 'thread_id', 'int'
+    )
+    print ('Ntiles / Nthreads = ', ntiles, ' / ', n_threads)
 
     return n_threads, thread_idsf.astype(int)
