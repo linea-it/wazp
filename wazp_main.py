@@ -100,16 +100,6 @@ job_id2 = slurm_submit(
 
 '''
 
-# tiles with clusters 
-eff_tiles = tiles_with_clusters(param_cfg['out_paths'], all_tiles)
-
-# concatenate clusters + sort by decreasing SNR + final filtering  
-data_clusters = wazp_concatenate(
-    eff_tiles, zpslices_filename, wazp_cfg, param_cfg['clcat'], 
-    cosmo_params, param_cfg['out_paths']
-)
-data_clusters.write(param_cfg['clcat']['wazp']['cat'], overwrite=True)
-
 # eff tiles for Pmems (not necessarily = as for wazp because of overlap)
 eff_tiles_pmem = eff_tiles_for_pmem(
     data_clusters, param_cfg['clcat']['wazp'], all_tiles, admin
