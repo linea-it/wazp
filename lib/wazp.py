@@ -36,7 +36,6 @@ from .utils import hpx_degrade, read_hpix_mosaicFitsCat
 from .utils import read_hpix_mosaicFootprint
 
 
-
 def store_wazp_confs(workdir, param_cfg, param_data):
     with open(
             os.path.join(workdir, 'config', 'wazp.cfg'), 'w'

@@ -1,7 +1,6 @@
 import numpy as np
 import yaml, os, sys, json
 
-from lib.multithread import split_equal_area_in_threads
 from lib.utils import sky_partition, read_FitsCat
 from lib.utils import create_mosaic_footprint
 from lib.utils import create_directory, add_key_to_fits
