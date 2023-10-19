@@ -2043,45 +2043,6 @@ def tiles_with_clusters(out_paths, all_tiles):
     return all_tiles[flag==1]
 
 
-def wazp_concatenate(all_tiles, zpslices_filename, wazp_cfg, clcat, 
-                     cosmo_params, out_paths):
-
-    zpslices = read_FitsCat(zpslices_filename)
-    # concatenate all tiles 
-    print ('Concatenate clusters')
-    list_clusters = []
-    for it in range(0, len(all_tiles)):
-        tile_dir = tile_dir_name(
-            out_paths['workdir'], int(all_tiles['id'][it]) 
-        )
-        list_clusters.append(
-            os.path.join(tile_dir, out_paths['wazp']['results'])
-        )
-    data_clusters0 = concatenate_clusters(
-        list_clusters, 'clusters.fits', 
-        os.path.join(out_paths['workdir'], 'tmp', 'clusters0.fits')
-    )    
-    # final filtering 
-    print ('........wazp final filtering') 
-    
-    # .... zpmax 
-    condzmax = (data_clusters0[clcat['wazp']['keys']['key_zp']] <= \
-             zpslices['zsl_max'][::-1][0])
-    condzmin = (data_clusters0[clcat['wazp']['keys']['key_zp']] >= \
-             zpslices['zsl'][0])
-
-    # .... duplicates 
-    data_clusters0f = cl_duplicates_filtering(
-        data_clusters0[condzmin & condzmax], wazp_cfg, clcat, zpslices, cosmo_params, 'survey'
-    )
-
-    # create unique index with decreasing SNR 
-    data_clusters = add_clusters_unique_id(
-        data_clusters0f, clcat['wazp']['keys']
-    )
-    return data_clusters 
-
-
 def official_wazp_cat(data_cl, clkeys, richness_specs, rich_min, wazp_file): 
 
 
