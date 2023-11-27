@@ -1,39 +1,28 @@
-import matplotlib
-matplotlib.use('Agg')
+import numpy as np
+import matplotlib.pyplot as plt
 import scipy.constants 
 from astropy.io import fits
 from astropy import wcs
 from astropy.stats import sigma_clip
-import  astropy.coordinates
+import astropy.coordinates
 from astropy.table import Table
 from astropy.coordinates import SkyCoord
 from astropy.convolution import convolve, Gaussian1DKernel
-from astropy.cosmology.core import FlatLambdaCDM as flat
+from astropy.cosmology import FlatLambdaCDM as flat
 from astropy import units as u
-import numpy as np
-import matplotlib.pyplot as plt
 import scipy.ndimage as ndi
-import os, json
-import math
-from math import cos 
+import yaml, os, json, subprocess, math
 import healpy as hp
 from scipy import interpolate
 from scipy.interpolate import griddata
 from skimage.feature import peak_local_max
-import logging 
-import yaml
-import subprocess
 
 from .utils import join_struct_arrays, dist_ang
-from .utils import _mstar_, makeHealpixMap, radec_window_area
+from .utils import _mstar_, makeHealpixMap
 from .utils import area_ann_deg2, hpx_in_annulus, sub_hpix, cond_in_disc
-from .utils import create_directory, tile_radius, concatenate_clusters
-from .utils import read_mosaicFitsCat_in_disc, read_mosaicFootprint_in_disc
-from .utils import read_FitsCat, read_mosaicFitsCat_in_hpix
-from .utils import read_mosaicFootprint_in_hpix, add_hpx_to_cat
-from .utils import add_clusters_unique_id, create_tile_specs
+from .utils import create_directory, read_FitsCat
 from .utils import hpx_degrade, read_hpix_mosaicFitsCat
-from .utils import read_hpix_mosaicFootprint
+from .utils import read_hpix_mosaicFootprint, make_tile_cat
 
 
 def store_wazp_confs(workdir, param_cfg, param_data):
@@ -58,7 +47,8 @@ def create_wazp_directories(workdir):
 
     create_directory(workdir)
     create_directory(os.path.join(workdir, 'tiles'))
-    create_directory(os.path.join(workdir, 'sky_partition'))
+    create_directory(os.path.join(workdir, 'sky_partition_wazp'))
+    create_directory(os.path.join(workdir, 'sky_partition_pmem'))
     create_directory(os.path.join(workdir, 'gbkg'))
     create_directory(os.path.join(workdir, 'calib'))
     create_directory(os.path.join(workdir, 'footprint'))
@@ -241,7 +231,7 @@ def create_wcs_at_z(wazp_cfg, tile_specs, z, cosmo_params):
     )
     racen, deccen = tile_specs['ra'], tile_specs['dec']
     pix_mpc = 1./float(wazp_cfg['resolution'])
-    conv_factor = cosmo.angular_diameter_distance(z)# radian*conv=mpc    
+    conv_factor = cosmo.angular_diameter_distance(z)
     pix_deg = np.degrees( pix_mpc / conv_factor.value)
 
     nxy = int(2.*tile_specs['radius_tile_deg']/pix_deg) + 1
@@ -330,7 +320,9 @@ def select_galaxies_in_slice(dat_galcat, galcat, wazp_cfg, zpslices,
     zp =  dat_galcat[galcat['keys']['key_zp']]
     
     zsl_min, zsl_max = zpslices['zsl_min'], zpslices['zsl_max']
-    mstar = _mstar_ (mstar_file,  zpslices['zsl'])
+    mstar = _mstar_(mstar_file,  zpslices['zsl'])
+
+
     #dmag_det =    wazp_cfg['dmag_det']
     dmag_bright = wazp_cfg['dmag_bright']
     mag_min, mag_max_det = mstar - dmag_bright, mstar + dmag_faint
@@ -359,7 +351,8 @@ def select_galaxies_in_slice(dat_galcat, galcat, wazp_cfg, zpslices,
     return ra_map, dec_map, weight_map
 
 
-def select_zps_cylinder(dcyl, dgal, galcat, zpslices, mstar_file, cosmo, wazp_specs):
+def select_zps_cylinder(dcyl, dgal,
+                        galcat, zpslices, mstar_file, cosmo, wazp_specs):
 
     rad_zdet, dmag_zdet = wazp_specs['rad_zdet'], wazp_specs['dmag_zdet']
 
@@ -376,9 +369,10 @@ def select_zps_cylinder(dcyl, dgal, galcat, zpslices, mstar_file, cosmo, wazp_sp
     zmin_z = zsl[dcyl['cyl_isl_min']] - nsig*sig_dz[dcyl['cyl_isl_min']]
     zmax_z = zsl[dcyl['cyl_isl_max']] + nsig*sig_dz[dcyl['cyl_isl_max']]
     cond =  ((zpg<zmax_z) & (zpg>zmin_z) & (magg<maglim))
-    conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])# radian*conv=mpc    
+    conv_factor = cosmo.angular_diameter_distance(dcyl['z_init'])
     rad_deg = np.degrees(rad_zdet / conv_factor.value)
-    cond_disc = cond_in_disc(rag[cond], decg[cond], dgal['hpx_tmp'][cond], 
+    cond_disc = cond_in_disc(rag[cond], decg[cond],
+                             dgal['hpix_tmp'][cond], 
                              wazp_specs['Nside_tmp'], wazp_specs['nest_tmp'], 
                              dcyl['ra'], dcyl['dec'], rad_deg)
 
@@ -437,14 +431,14 @@ def bkg_global_survey(galcat, footprint,
 
     # relevant paths and files 
     tiles_filename = os.path.join(
-        workdir, 'sky_partition', 
+        workdir, tiling['rpath'],
         tiling['tiles_filename']
     )
     zpslices_filename = os.path.join(
         workdir, wazp_cfg['zpslices_filename']
     )
     tiles_core_npy = os.path.join(
-        workdir, 'sky_partition', 
+        workdir, tiling['rpath'],
         tiling['sky_partition_npy']
     )
     gbkg_filename = os.path.join(
@@ -454,18 +448,20 @@ def bkg_global_survey(galcat, footprint,
 
     if os.path.isfile(gbkg_filename):
         return
-
+    print ('Global bkg computation')
+    
     # load tiles 
     hpix_core_lists = np.load(
         os.path.join(
-            workdir, 'sky_partition', 
+            workdir, tiling['rpath'], 
             tiling['sky_partition_npy']
         ), 
         allow_pickle=True
     )
 
     area_min = wazp_cfg['gbkg_area']
-    # select galcat and associated footprint to reach some minimum area in the survey 
+    # select galcat and associated footprint to reach some
+    # minimum area in the survey 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
     tiles = read_FitsCat(tiles_filename)
     zpslices = read_FitsCat(zpslices_filename)
@@ -710,8 +706,6 @@ def compute_filled_catimage(ra_map, dec_map, weight_map, zpslices, wazp_cfg, til
 
 def run_mr_filter(filled_catimage, wmap, wazp_cfg):
     
-    path_mr = wazp_cfg['path_mr_filter']
-
     # run mr_filter to build wavelet map
     scale_min_pix = wazp_cfg['scale_min_mpc'] * float(wazp_cfg['resolution'])
     scale_max_pix = wazp_cfg['scale_max_mpc'] * float(wazp_cfg['resolution'])
@@ -721,7 +715,7 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
 
     if smin == 0:
         subprocess.run((
-            os.path.join(path_mr, 'mr_filter')+\
+            'mr_filter'+\
             ' -m 10 -i 3 -s 3.,3. -n '+str(smax+1)+\
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
@@ -729,21 +723,21 @@ def run_mr_filter(filled_catimage, wmap, wazp_cfg):
 
     if smin == 1:
         subprocess.run((
-            os.path.join(path_mr, 'mr_filter')+\
+            'mr_filter'+\
             ' -m 10 -i 3 -s 10.,3.,3. -n '+str(smax+1)+\
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
         ), check=True, shell=True, stdout=subprocess.PIPE).stdout
     if smin == 2:
         subprocess.run((
-            os.path.join(path_mr, 'mr_filter')+\
+            'mr_filter'+\
             ' -m 10 -i 3 -s 10.,10.,3.,3. -n '+str(smax+1)+\
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
         ), check=True, shell=True, stdout=subprocess.PIPE).stdout
     if smin == 3:
         subprocess.run((
-            os.path.join(path_mr, 'mr_filter')+\
+            'mr_filter'+\
             ' -m 10 -i 3 -s 10.,10.,10.,3.,3. -n '+str(smax+1)+\
             ' -f 3 -K -C 2 -p -e0 -A '+\
             filled_catimage+' '+wmap
@@ -961,7 +955,7 @@ def add_peaks_attributes(data_peaks, dat_galcat, galcat,
     return
 
 
-def init_cylinders (keyrank, peak_ids, wazp_specs):
+def init_cylinders(keyrank, peak_ids, wazp_specs):
 
     ncyl = keyrank.shape[0]
     nsl = keyrank.shape[1]
@@ -1028,9 +1022,11 @@ def key_cylinder(key_cyl, key_1, length, i0, i1, isl, nslices, type):
 
     return key_cyl
 
-def append_peaks_infos_to_cylinders(data_cylinders_init, peaks_list, zpslices_specs, 
-                                    ip_cyl, ra_cyl, dec_cyl, rank_cyl, snr_cyl):    
 
+def append_peaks_infos_to_cylinders(data_cylinders_init, peaks_list,
+                                    zpslices_specs, 
+                                    ip_cyl, ra_cyl, dec_cyl,
+                                    rank_cyl, snr_cyl):    
 
     zsl = zpslices_specs['zsl']
     nsl = len(zsl)
@@ -1473,9 +1469,10 @@ def z_local_maxima(dcyl, tile_specs, wazp_specs, zpslices_specs,
 
 
 
-def cylinders2clusters (zpslices_specs, wazp_specs, tile_specs, clcat, data_cyl, 
-                        mstar_file, cosmo_params, 
-                        data_gal, galcat, out_paths, hpx_meta, verbose):
+def cylinders2clusters(zpslices_specs, wazp_specs, tile_specs,
+                       clcat, data_cyl, 
+                       mstar_file, cosmo_params, 
+                       data_gal, galcat, out_paths, hpx_meta, verbose):
 
     clkeys = clcat['wazp']['keys']
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
@@ -1485,7 +1482,9 @@ def cylinders2clusters (zpslices_specs, wazp_specs, tile_specs, clcat, data_cyl,
     snr_fcyl = data_cyl['snr_cyl']
 
     # get_cylinders
-    ra_cyl, dec_cyl, z_cyl = data_cyl['ra'], data_cyl['dec'], data_cyl['z_init']
+    ra_cyl, dec_cyl, z_cyl = data_cyl['ra'],\
+                             data_cyl['dec'],\
+                             data_cyl['z_init']
     snr_cyl = data_cyl['snr']
     isl_mode = data_cyl['cyl_isl_mode']
     isl_min, isl_max = data_cyl['cyl_isl_min'], data_cyl['cyl_isl_max']
@@ -1501,7 +1500,7 @@ def cylinders2clusters (zpslices_specs, wazp_specs, tile_specs, clcat, data_cyl,
     z_init, snr_init =  np.zeros(2*ncyl), np.zeros(2*ncyl)
     ra_cl, dec_cl = np.zeros(2*ncyl), np.zeros(2*ncyl)
     z_cl, snr_cl =  np.zeros(2*ncyl), np.zeros(2*ncyl)
-    icyl = np.zeros(2*ncyl).astype(int) # maximum length assuming 2 clusters / cylinder 
+    icyl = np.zeros(2*ncyl).astype(int) # max length assuming 2 cl/cyl
     isl_cl = np.zeros(2*ncyl).astype(int)
     isl_cl_init = np.zeros(2*ncyl).astype(int)
     z_cl = np.zeros(2*ncyl)
@@ -1598,11 +1597,20 @@ def cylinders2clusters (zpslices_specs, wazp_specs, tile_specs, clcat, data_cyl,
     return data_clusters
 
 
-def cl_duplicates_filtering(data_clusters_in, wazp_specs, clcat, 
+def cl_duplicates_filtering(data_clusters0, wazp_specs, clcat, 
                             zpslices_specs, cosmo_params, mode):
     # mode can be tile or survey
     # if mode = survey => search for duplicates coming from diff tiles
 
+    print ('........wazp final filtering') 
+
+    # zpmin / zpmax
+    condzmax = (data_clusters0[clcat['wazp']['keys']['key_zp']] <= \
+                zpslices_specs['zsl_max'][::-1][0])
+    condzmin = (data_clusters0[clcat['wazp']['keys']['key_zp']] >= \
+                zpslices_specs['zsl'][0])
+    data_clusters_in = data_clusters0[condzmin & condzmax]
+    
     clkeys = clcat['wazp']['keys']
     dmpc = wazp_specs['duplic_dist_mpc']
     nsigdz = wazp_specs['duplic_nsigdz']
@@ -1664,7 +1672,8 @@ def append_infos_to_clusters(target, data_clusters_init, cosmo_params):
     zcl = data_clusters_init['z']
 
     dist_arcmin = 60. * np.degrees(dist_ang(
-        data_clusters_init['ra'], data_clusters_init['dec'], ra_target, dec_target
+        data_clusters_init['ra'], data_clusters_init['dec'],
+        ra_target, dec_target
     ))
     conv_factor = cosmo.angular_diameter_distance(zcl)
     dist_mpc = np.radians(dist_arcmin/60.) * conv_factor.value 
@@ -1691,7 +1700,10 @@ def append_infos_to_clusters(target, data_clusters_init, cosmo_params):
 
 def wave_radius(wmap_data, ip, jp, wazp_cfg):
 
-    dwmap = ndi.distance_transform_edt((wmap_data>wazp_cfg['wmap_thresh'])*wmap_data)
+    dwmap = ndi.distance_transform_edt(
+        (wmap_data>wazp_cfg['wmap_thresh']
+        )*wmap_data
+    )
     radius_mpc = dwmap[ip, jp]/float(wazp_cfg['resolution'])
     return radius_mpc
 
@@ -1825,60 +1837,47 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
     return data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']]
 
 
-def add_hpx_to_cat(data_gal, ra, dec, Nside_tmp, nest_tmp, keyname):
-    ghpx = hp.ang2pix(Nside_tmp, ra, dec, nest_tmp, lonlat=True)
-    t = Table (data_gal)
-    t[keyname] = ghpx
-    return t
-
-
 def wazp_tile(admin, tile_specs, 
               galcat, footprint, 
-              zp_metrics, mstar_file, maglim, 
-              wazp_cfg, clcat, cosmo_params, out_paths, verbose): 
+              mstar_file, maglim, 
+              wazp_cfg, clcat, cosmo_params, out_paths, verbose,
+              dat_galcat=None, dat_footprint=None):  
+
 
     workdir = out_paths['workdir']
-    tile_dir = os.path.join(
-        workdir, 'tiles', 'tile_'+str(int(tile_specs['id'])).zfill(5)
-    )
-    print ('..... Tile ', int(tile_specs['id']))
+    
+    if admin['target_mode']:
+        tile_dir = workdir 
+    else:
+        tile_dir = os.path.join(
+            workdir, 'tiles', 'tile_'+str(int(tile_specs['id'])).zfill(5)
+        )
+        print ('..... Tile ', int(tile_specs['id']))
 
     if os.path.isfile(os.path.join(
             tile_dir, out_paths['wazp']['results'], "clusters.fits"
     )):
         return
 
-    create_directory(tile_dir)
-    create_tile_directories(tile_dir, out_paths['wazp'])
+    if not admin['target_mode']:
+        create_directory(tile_dir)
+        create_tile_directories(tile_dir, out_paths['wazp'])
+
     out_paths['workdir_loc'] = tile_dir # local update 
-
-    data_gal_tile = read_hpix_mosaicFitsCat(
-        tile_specs['hpix_tile'], 
-        galcat['mosaic']['dir']
-    )
-    data_gal_tile = data_gal_tile\
-                    [data_gal_tile[galcat['keys']['key_mag']]<=\
-                     np.float64(maglim)]
-
-    data_fp_tile = read_hpix_mosaicFootprint(
-        tile_specs['hpix_tile'], 
-        footprint['mosaic']['dir']
-    )
-
-    # add hpx to galcat to speed up condition_in_disc around all detections
-    data_gal_tile = add_hpx_to_cat(
-        data_gal_tile, data_gal_tile[galcat['keys']['key_ra']], 
-        data_gal_tile[galcat['keys']['key_dec']],
-        wazp_cfg['Nside_tmp'], wazp_cfg['nest_tmp'], 'hpx_tmp'
-    )
-
-    if verbose >=2:
-        t = Table (data_gal_tile)
-        t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
-        t = Table (data_fp_tile)
-        t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
-
-
+    if dat_galcat is None:
+        data_gal_tile, data_fp_tile = make_tile_cat(
+            tile_specs,
+            galcat, footprint,
+            maglim, wazp_cfg
+        )        
+        if verbose >=2:
+            t = Table (data_gal_tile)
+            t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
+            t = Table (data_fp_tile)
+            t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
+    else:   
+        data_gal_tile, data_fp_tile = dat_galcat, dat_footprint
+        
     zpslices = read_FitsCat(
         os.path.join(
             workdir, wazp_cfg['zpslices_filename']
@@ -1958,12 +1957,12 @@ def wazp_tile(admin, tile_specs,
                     mstar_file, cosmo_params, 
                     data_gal_tile, galcat, out_paths, footprint, verbose
                 )
-                np.save(
-                    os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['results'], 
-                        'clusters0.npy'
-                    ), data_clusters0
-                )
+                np.save(os.path.join(
+                    out_paths['workdir_loc'],
+                    out_paths['wazp']['results'], 
+                    'clusters0.npy'
+                ), data_clusters0)
+                
                 if verbose >=1:
                     t = Table (data_clusters0)
                     t.write(os.path.join(
@@ -1977,16 +1976,16 @@ def wazp_tile(admin, tile_specs,
     else:
         print ('..........Use existing clusters')
         data_clusters0 = np.load(
-            os.path.join(
-                out_paths['workdir_loc'], out_paths['wazp']['results'], 
-                'clusters0.npy'
-            )
+            os.path.join(out_paths['workdir_loc'],
+                out_paths['wazp']['results'], 
+                'clusters0.npy')
         )
         
     print ('..........Start filtering ')
     if data_clusters0 is not None:
         data_clusters = cl_duplicates_filtering(
-            data_clusters0, wazp_cfg, clcat, zpslices, cosmo_params, 'tile'
+            data_clusters0, wazp_cfg, clcat,
+            zpslices, cosmo_params, 'tile'
         )
         Nclusters = len(data_clusters)
     else:
@@ -1995,8 +1994,15 @@ def wazp_tile(admin, tile_specs,
 
     # write final tile recap for final concatenation of clusters
     tile_info = np.zeros( 1, 
-                          dtype={'names':('id', 'eff_area_deg2', 'Nclusters'),
-                                 'formats':('i8', 'f8', 'i8')}) 
+                          dtype = {
+                              'names':(
+                                  'id', 'eff_area_deg2', 'Nclusters'
+                              ),
+                              'formats':(
+                                  'i8', 'f8', 'i8'
+                              )
+                          }
+    ) 
     tile_info['id'] = tile_specs['id']
     tile_info['eff_area_deg2'] = tile_specs['eff_area_deg2']
     tile_info['Nclusters'] = Nclusters
@@ -2116,28 +2122,41 @@ def official_wazp_cat(data_cl, clkeys, richness_specs, rich_min, wazp_file):
     return
 
 
-def wmap_at_zcl(target, data_primary_clusters, r200_mpc, 
+def wmap_at_zcl(target, data_primary_clusters, 
                 cluster_keys, 
-                wazp_specs, tile_specs, zpslices_specs, 
+                wazp_specs, tile_specs, zpslices_specs,
                 cosmo_params, 
-                dat_footprint, hpx_meta, dat_galcat, galcat_keys, 
-                mstar_filename, workdir, path_outputs, path):
+                dat_footprint, hpx_meta, 
+                dat_galcat, galcat_keys, mstar_filename, 
+                workdir, path_outputs):
     
     zcl = data_primary_clusters[cluster_keys['key_zp']]
     wmap_list = []
+    vmap_list = []
     ncl = len(zcl)
     if target['z']>0.:
         ncl = 1
+    zsl_min, zsl_max = zpslices_specs['zsl_min'], \
+                       zpslices_specs['zsl_max']
+    zsl = zpslices_specs['zsl']
+    sig = (zsl_max - zsl_min)/4.
+    fsig = interpolate.interp1d(
+        zsl, sig, 
+        kind = 'linear', bounds_error=False, fill_value='extrapolate'
+    )
 
     for i in range (0, len(zcl)):
-
-        xycat_fi_fitsname = os.path.join(
+        xycat_fitsname = os.path.join(
             workdir, path_outputs, 
-            'xycat_fi_cl'+str(i)+'.fits'
+            'xycat_cl'+str(i)+'.fits'
         )
         wmap_fitsname = os.path.join(
             workdir, path_outputs, 
             'wmap_cl'+str(i)+'.fits'
+        )
+        vmap_fitsname = os.path.join(
+            workdir, path_outputs, 
+            'vmap_cl'+str(i)+'.fits'
         )
         zslice = {
             'zsl': zcl[i], 
@@ -2145,24 +2164,27 @@ def wmap_at_zcl(target, data_primary_clusters, r200_mpc,
             'zsl_max': zcl[i] + 2.*fsig(zcl[i])
                  }
         ra_map, dec_map, weight_map = select_galaxies_in_slice(
-            dat_galcat, galcat_keys, 
-            wazp_specs, zslice, mstar_filename, 
+            dat_galcat, galcat_keys, wazp_specs, zslice, mstar_filename, 
             wazp_specs['dmag_det'], 'detlum'
         )
-        xycat_fi = compute_catimage(
+        xycat = compute_catimage(
             ra_map, dec_map, weight_map, 
             zslice, wazp_specs, tile_specs, cosmo_params
         ) 
-        map2fits(
-            xycat_fi, wazp_specs, tile_specs, zcl[i], cosmo_params, 
-            xycat_fi_fitsname
-        )
-        run_mr_filter(
-            xycat_fi_fitsname, wmap_fitsname, wazp_specs
-        ) 
+        map2fits(xycat, wazp_specs, tile_specs, zcl[i], cosmo_params, 
+                 xycat_fitsname)
+        run_mr_filter(xycat_fitsname, wmap_fitsname, wazp_specs) 
         wmap_list.append(wmap_fitsname)
 
-    return wmap_list
+        vmap = vmap_from_hpx (
+            dat_footprint, hpx_meta, 
+            tile_specs, wazp_specs, cosmo_params, zcl[i]
+        )
+        map2fits(vmap, wazp_specs, tile_specs, zcl[i], cosmo_params, 
+                 vmap_fitsname)
+        vmap_list.append(vmap_fitsname)
+
+    return wmap_list, vmap_list
 
 
 def update_config(param_cfg, param_data):
@@ -2173,6 +2195,10 @@ def update_config(param_cfg, param_data):
     survey = param_cfg['survey']
     ref_filter = param_cfg['ref_filter']
 
+    if param_cfg['admin']['tiling_pmem']['ntiles'] == 'max':
+        param_cfg['admin']['tiling_pmem']['ntiles'] = \
+            param_cfg['admin']['slurm']['max_parallel']
+    
     # update mag with selected filter in config 
     param_data['galcat'][survey]['keys']['key_mag'] = \
           param_data['galcat'][survey]['keys']['key_mag'][ref_filter]
@@ -2204,8 +2230,9 @@ def update_config(param_cfg, param_data):
         int(maglim_pmem)+1
     )
 
-    param_cfg['admin']['tiling']['nest'] = \
-        input_data_structure[survey]['nest']
+    #param_cfg['admin']['tiling']['nest'] = \
+    #    input_data_structure[survey]['nest']
+
     param_data['galcat'][survey]['mosaic']['Nside'] = \
         input_data_structure[survey]['Nside']
     param_data['galcat'][survey]['mosaic']['nest'] = \
@@ -2216,5 +2243,4 @@ def update_config(param_cfg, param_data):
         input_data_structure[survey]['nest']
 
     return param_cfg, param_data
-
 
