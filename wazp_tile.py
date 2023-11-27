@@ -9,7 +9,6 @@ config = sys.argv[1]
 dconfig = sys.argv[2]
 tile_id = int(sys.argv[3])
 
-
 # read config file
 with open(config) as fstream:
     param_cfg = yaml.safe_load(fstream)
@@ -32,36 +31,34 @@ wazp_cfg = param_cfg['wazp_cfg']
 workdir = out_paths['workdir']
 all_tiles = read_FitsCat(
     os.path.join(
-        workdir, 'sky_partition',
-        admin['tiling']['tiles_filename'])
+        workdir, admin['tiling_wazp']['rpath'],
+        admin['tiling_wazp']['tiles_filename'])
 )
-idt = np.argwhere(all_tiles['thread_id']==int(thread_id)).T[0]    
-tiles_specs = all_tiles[idt]
 hpix_tile_lists = np.load(
     os.path.join(
-        workdir, 'sky_partition', 
-        admin['tiling']['tiles_npy']
+        workdir, admin['tiling_wazp']['rpath'],
+        admin['tiling_wazp']['tiles_npy']
     ), 
     allow_pickle=True
-)[idt]
+)
 hpix_core_lists = np.load(
     os.path.join(
-        workdir, 'sky_partition', 
-        admin['tiling']['sky_partition_npy']
+        workdir, admin['tiling_wazp']['rpath'],
+        admin['tiling_wazp']['sky_partition_npy']
     ), 
     allow_pickle=True
-)[idt]
+)
 
 # generate tile specs and run detection
 tile_specs = create_tile_specs(
-    tiles_specs[tile_id], admin, 
-    hpix_core_lists[tile_id], hpix_tile_lists[tile_id],
-    None, None
+    admin['target_mode'], admin['tiling_wazp'],
+    all_tiles[tile_id],  
+    hpix_core_lists[tile_id], hpix_tile_lists[tile_id]
 )
 wazp_tile(
     admin, tile_specs, 
     galcat, footprint, 
-    zp_metrics, magstar_file, maglim,
+    magstar_file, maglim,
     wazp_cfg, clcat, param_cfg['cosmo_params'], 
     out_paths, param_cfg['verbose'] 
 ) 
