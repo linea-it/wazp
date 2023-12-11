@@ -2006,20 +2006,20 @@ def wazp_tile(admin, tile_specs,
     tile_info['id'] = tile_specs['id']
     tile_info['eff_area_deg2'] = tile_specs['eff_area_deg2']
     tile_info['Nclusters'] = Nclusters
-    
+    tile_info = Table(tile_info)
+    tile_info.write(os.path.join(
+        out_paths['workdir_loc'], out_paths['wazp']['results'], 
+        "tile_info.fits"
+    ), overwrite=True)
+
     if data_clusters is not None:
-        t = Table (data_clusters)#, names=names)
+        t = Table (data_clusters)
         t.write(
             os.path.join(
                 tile_dir, out_paths['wazp']['results'], 
                 "clusters.fits"
             ),overwrite=True
         )
-        tile_info = Table(tile_info)
-        tile_info.write(os.path.join(
-            out_paths['workdir_loc'], out_paths['wazp']['results'], 
-            "tile_info.fits"
-        ), overwrite=True)
     return 
 
 
