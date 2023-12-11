@@ -51,7 +51,6 @@ def create_wazp_directories(workdir):
     create_directory(os.path.join(workdir, 'sky_partition_pmem'))
     create_directory(os.path.join(workdir, 'gbkg'))
     create_directory(os.path.join(workdir, 'calib'))
-    create_directory(os.path.join(workdir, 'footprint'))
     create_directory(os.path.join(workdir, 'config'))
     create_directory(os.path.join(workdir, 'tmp'))
     return

@@ -423,7 +423,8 @@ def create_mosaic_footprint(footprint, fpath):
     # from a survey footprint create a mosaic of footprints at lower resol.
     if os.path.exists(fpath):
         return
-
+    
+    create_directory(fpath)
     print ('Create footprint mosaic')
     create_directory(fpath)
     hpix0, frac0 = read_FitsFootprint(
