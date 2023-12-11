@@ -37,7 +37,7 @@ def create_slurm_script(task, config, dconfig, narray, script):
     if narray > 1:
         f.write(f"python {scr}{task}.py {config} {dconfig} $SLURM_ARRAY_TASK_ID\n")
     else:
-        f.write(f"python {scr}{task}.py  {config} {dconfig}\n")
+        f.write(f"python {scr}{task}.py  {config} {dconfig} 0\n")
     f.close()
     return 
     
@@ -421,8 +421,11 @@ def create_mosaic_footprint(footprint, fpath):
         fpath (_type_): _description_
     """
     # from a survey footprint create a mosaic of footprints at lower resol.
-    if not os.path.exists(fpath):
-        os.mkdir(fpath)
+    if os.path.exists(fpath):
+        return
+
+    print ('Create footprint mosaic')
+    create_directory(fpath)
     hpix0, frac0 = read_FitsFootprint(
         footprint['survey_footprint'], footprint
     )
@@ -1005,6 +1008,17 @@ def sky_partition(tiling, gdir, footprint, workdir):
         print ('Sky partition for characterization')
     else:
         print ('Sky partition for detection')
+
+    if os.path.isfile(
+            os.path.join(
+                workdir, tiling['rpath'],
+                tiling['tiles_filename'])):
+        ntiles = len(read_FitsCat(
+            os.path.join(
+                workdir, tiling['rpath'],
+                tiling['tiles_filename'])))
+        print ('.....Nr. of Tiles = ', ntiles)
+        return ntiles
         
     overlap_deg = tiling['overlap_deg']
     Nside = tiling['Nside']
@@ -1017,7 +1031,6 @@ def sky_partition(tiling, gdir, footprint, workdir):
         [os.path.splitext(x)[0] for x in raw_list]
     ).astype(int)
     ra0_crossing, ra_split = scan_survey_ra(hpix_fits, Nside, nest)
-
     if tiling['ntiles'] > 0:
         ntiles = tiling['ntiles']
     else:
@@ -1061,7 +1074,7 @@ def sky_partition(tiling, gdir, footprint, workdir):
                 tiling['sky_partition_npy']
             ), np.array(partition, dtype=object)
         )
-
+        
         # ra-dec plot of the partition
         plt.clf()
         plt.figure(figsize=(8, 8))
@@ -1105,8 +1118,8 @@ def sky_partition(tiling, gdir, footprint, workdir):
                     print ('......Tile ',i, ' / ', ntiles)
             else:
                 print ('......Tile ',i, ' / ', ntiles)    
-            hp_lab = partition[i]
-            all_hp_neigh = np.array([]).astype('int')
+            hp_lab = np.array(partition[i]).astype(int)
+            all_hp_neigh = np.array([]).astype(int)
             for j in range(0, N_layers):
                 hp_tile = np.hstack((hp_lab, all_hp_neigh))
                 all_hp = np.unique(
@@ -1153,8 +1166,8 @@ def sky_partition(tiling, gdir, footprint, workdir):
     radius_deg = np.zeros(len(partition))
 
     for i in range(0, ntiles):
-        hp_core = partition[i]
-        hp_tile = tiles[i]
+        hp_core = np.array(partition[i]).astype(int)
+        hp_tile = np.array(tiles[i]).astype(int)
         npix_core[i] = len(hp_core)
         npix_tile[i] = len(hp_tile)
         racen[i], deccen[i] = tile_center(
@@ -1406,7 +1419,7 @@ def create_ptile_specs(target, radius,
         radius_filter_deg = search_radius/60.
     if radius_unit == 'mpc':
         radius_filter_deg = np.degrees(
-            (search_radius/60.) / target['conv_factor']
+            (search_radius / target['conv_factor'])
         )
 
     ptile_specs = {'id': 0,
