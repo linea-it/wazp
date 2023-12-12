@@ -2382,7 +2382,7 @@ def pmem_tile(admin, tile_specs,
             data_lgal, galcat, bkg_area_deg2, cosmo_params, out_paths, 
             data_richness, verbose
         )
-
+        #print ('MEM ', data_members)
         # concatenate data_members 
         if data_members is not None:
             if flag_init_members == 0:
@@ -2421,7 +2421,7 @@ def pmem_tile(admin, tile_specs,
             )
 
     # write outputs to fits
-    t = Table (data_richness)#, names=names)
+    t = Table (data_richness)
     t.write(
         os.path.join(
             tile_dir, 
@@ -2429,7 +2429,7 @@ def pmem_tile(admin, tile_specs,
             "richness.fits"
         ),overwrite=True
     )
-    t = Table (data_members)#, names=names)
+    t = Table (data_members_tile)
     t.write(
         os.path.join(
             tile_dir, 
