@@ -2052,7 +2052,6 @@ def official_wazp_cat(data_cl, clkeys, richness_specs, rich_min, wazp_file):
 
 
     data_cl = data_cl[data_cl['n200_pmem']>=rich_min]
-
     npts = str(richness_specs['npts'])
 
     data = np.zeros( 
