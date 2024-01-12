@@ -22,6 +22,21 @@ This is a code intended to identify and qualify galaxy clusters in large multi-b
 7. concatenate richnesses and membership
 8. merge detections and richnesses 
 
+## Important assumption
+
+The input galaxy catalogs are expected to be located in one directory as
+a list of fits files
+corresponding to a spatial partitioning based on Healpix with Nside=64. 
+It can be nested of ring - this is specified in the data configuration file.
+Each file is named as #hpixel.fits
+
+The associated masks/footprints are expected to follow the same structure
+and be named as #hpixel_footprint.fits. Note that there is also the option
+to have the footprint as a single file, which can be convenient for relatively
+small surveys. 
+
+These are described in the 'input_data_structure' section of the data config
+file. 
 
 ## WaZP with SLURM
 
