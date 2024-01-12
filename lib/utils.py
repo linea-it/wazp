@@ -26,6 +26,7 @@ def create_slurm_script(task, config, dconfig, narray, script):
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")
     f.write(f"#SBATCH --job-name={task}\n")
+    f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
     if narray > 1:
         f.write(
             f"#SBATCH --cpus-per-task={slurm_cfg['cpus-per-task']}\n"
