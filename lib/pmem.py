@@ -1,19 +1,14 @@
-import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.io.fits as fits
-import os, yaml
-from astropy.cosmology.core import FlatLambdaCDM as flat
+import os, yaml, time, math
+from astropy.cosmology import FlatLambdaCDM as flat
 from astropy import units as u
-from astropy.convolution import convolve,Gaussian1DKernel
+from astropy.convolution import convolve, Gaussian1DKernel
 import healpy as hp
 from math import log, exp, atan, atanh
 from astropy.table import Table
-from scipy.optimize import least_squares
 from scipy import interpolate
-import math
-import logging 
-import time 
 
 from .utils import mad, gaussian, dist_ang, _mstar_, join_struct_arrays
 from .utils import all_hpx_in_annulus, hpx_in_annulus
@@ -21,32 +16,46 @@ from .utils import cond_in_disc, cond_in_hpx_disc
 from .utils import get_gaussian_kernel_1d, create_directory
 from .utils import read_mosaicFitsCat_in_disc, read_FitsCat, add_hpx_to_cat
 from .utils import create_tile_specs, concatenate_clusters
-from .utils import concatenate_members
+from .utils import concatenate_members, read_sources_in_hpixs
 from .utils import read_mosaicFootprint_in_disc, filter_hpx_tile
-from .utils import filter_disc_tile, area_ann_deg2
+from .utils import filter_disc_tile, area_ann_deg2, make_tile_cat
 
 
 def tile_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'tiles', 'tile_'+str(tile_nr).zfill(3))
 
+
 def thread_dir_name(workdir, tile_nr):
     return os.path.join(workdir, 'threads', 'tile_'+str(tile_nr).zfill(3))
 
 
-def create_pmem_directories(workdir, path):  # only called from pmem_main
+def create_pmem_directories(workdir, ppath):  # only called from pmem_main
     """
     creates the relevant directories for writing results/plots
     """
     if not os.path.exists(workdir):
         os.mkdir(workdir)
-    if not os.path.exists(os.path.join(workdir, path['results'])):
-        os.mkdir(os.path.join(workdir, path['results']))
-    if not os.path.exists(os.path.join(workdir, path['plots'])):
-        os.mkdir(os.path.join(workdir, path['plots']))
-    if not os.path.exists(os.path.join(workdir, path['files'])):
-        os.mkdir(os.path.join(workdir, path['files']))
-
+    if not os.path.exists(os.path.join(workdir, ppath['results'])):
+        os.mkdir(os.path.join(workdir, ppath['results']))
+    if not os.path.exists(os.path.join(workdir, ppath['plots'])):
+        os.mkdir(os.path.join(workdir, ppath['plots']))
+    if not os.path.exists(os.path.join(workdir, ppath['files'])):
+        os.mkdir(os.path.join(workdir, ppath['files']))
     return
+
+
+def create_tile_directories(root, path): 
+    """
+    creates the relevant directories for writing results/plots
+    """
+    if not os.path.exists(os.path.join(root, path['results'])):
+        os.mkdir(os.path.join(root, path['results']))
+    if not os.path.exists(os.path.join(root, path['plots'])):
+        os.mkdir(os.path.join(root, path['plots']))
+    if not os.path.exists(os.path.join(root, path['files'])):
+        os.mkdir(os.path.join(root, path['files']))
+    return
+
 
 def nfw_2D (R, Rc, Rs, h):
     """
@@ -465,7 +474,7 @@ def  plot_richness_vec (radius_vec_mpc, richness_vec, richness_err_vec,
     """
     Diagnostic plot to check the vectorial richness
     """
-    workdir, path = out_paths['workdir_loc'], out_paths['pmem']
+    workdir = out_paths['workdir_loc']
     slope = rfit[1]
     n200_pmem_cor = 10**(rfit(np.log10(r200)))
     plt.clf()
@@ -490,7 +499,7 @@ def  plot_richness_vec (radius_vec_mpc, richness_vec, richness_err_vec,
     plt.tight_layout()
     plt.savefig(
         os.path.join(
-            workdir, path['plots'],
+            workdir, out_paths['pmem']['plots'],
             'richness_vec_cl'+str(idcl)+'.png'
         ), dpi=300
     )
@@ -499,7 +508,7 @@ def  plot_richness_vec (radius_vec_mpc, richness_vec, richness_err_vec,
 
 def plot_pmems(my_cluster, data_gal, galcat_keys, pmem, r200, n200, out_paths):
 
-    workdir, path = out_paths['workdir_loc'], out_paths['pmem']
+    workdir = out_paths['workdir_loc']
     idcl = my_cluster['idcl']
     racl, deccl = my_cluster['racl'], my_cluster['deccl']
     conv_factor = my_cluster['conv_factor']
@@ -561,7 +570,7 @@ def plot_pmems(my_cluster, data_gal, galcat_keys, pmem, r200, n200, out_paths):
     plt.tight_layout()
     plt.savefig(
         os.path.join(
-            workdir, path['plots'], 
+            workdir, out_paths['pmem']['plots'], 
             'pmems_cl'+str(idcl)+'.png'
         ), dpi=300
     )
@@ -1183,7 +1192,7 @@ def compute_r200_n200(my_cluster, data_gal, galcat_keys, bkg_mpc2,
     - a boolean to indicate a failure - which will stop the analysis of the cluster
     - a flag if r200 is found smaller than minimum r200
     """
-    workdir, path = out_paths['workdir_loc'], out_paths['pmem']
+    workdir = out_paths['workdir_loc']
     r200_specs = pmem_cfg['r200_specs']
     radial_bin_specs = pmem_cfg['radial_bin_specs']
     mag_bin_specs = pmem_cfg['mag_bin_specs']
@@ -1280,7 +1289,7 @@ def compute_r200_n200(my_cluster, data_gal, galcat_keys, bkg_mpc2,
                     plot_galdens_3d (
                         radius_test, ratio, rfit, 
                         os.path.join(
-                            workdir, path['plots'], 
+                            workdir, out_paths['pmem']['plots'], 
                             'dens_ratio_cl'+str(idcl)+'.png'
                         )
                     )
@@ -1421,6 +1430,7 @@ def prepare_data_calib_dz(my_cluster, pmem_cfg, hpx_meta,
     dmagmax = pmem_cfg['pmem_specs']['dmagmax']
     data_for_calib = None 
     data_galc = general_local_galcat(
+        pmem_cfg,
         data_gal, galcat_keys, hpx_meta, my_cluster, 
         calib_cfg['radius_mpc'], calib_cfg['Nsig'], dmagmin, dmagmax
     )
@@ -1462,11 +1472,11 @@ def prepare_data_calib_dz(my_cluster, pmem_cfg, hpx_meta,
     return data_for_calib
 
 
-def local_zp_stats(data_gal_tile, galcat_keys, my_cluster):
+def local_zp_stats(pmem_cfg, data_gal_tile, galcat_keys, my_cluster):
 
     nsig = 5.
-
     data_gal_zpstats = general_local_galcat(
+        pmem_cfg,
         data_gal_tile, galcat_keys, my_cluster, 0.5, nsig, 2., 2.
     )
     zp = data_gal_zpstats[galcat_keys['key_zp']]
@@ -1627,13 +1637,13 @@ def varGaussian_pdf(x, sig0, allx, dx, startpos, endpos):
     return result
 
 
-def general_local_galcat(data_gal_tile, galcat_keys, hpx_meta, 
+def general_local_galcat(pmem_cfg, data_gal_tile, galcat_keys, hpx_meta, 
                          my_cluster, radius_max_mpc, nsig, dmagmin, dmagmax):
     #extract relevant keys from galcat 
 
     ra, dec = data_gal_tile[galcat_keys['key_ra']],\
               data_gal_tile[galcat_keys['key_dec']]
-    hpix_gal = data_gal_tile['hpix_gal']
+    hpix_gal = data_gal_tile['hpix_tmp']
     zp, mag = data_gal_tile[galcat_keys['key_zp']],\
               data_gal_tile[galcat_keys['key_mag']]
     #extract cluster data
@@ -1653,7 +1663,7 @@ def general_local_galcat(data_gal_tile, galcat_keys, hpx_meta,
     # filter in distance to cl. 
     in_cone = cond_in_hpx_disc(
         hpix_gal[cond], 
-        hpx_meta['Nside'], hpx_meta['nest'], 
+        pmem_cfg['Nside_tmp'], pmem_cfg['nest_tmp'], 
         racl, deccl, radius_bkg_max_deg
     )
     cond[np.argwhere(cond).T[0]] = in_cone 
@@ -1661,7 +1671,7 @@ def general_local_galcat(data_gal_tile, galcat_keys, hpx_meta,
     return data_gal
 
 
-def local_galcat (data_gal_tile, galcat_keys, hpx_meta, my_cluster, 
+def local_galcat (pmem_cfg, data_gal_tile, galcat_keys, hpx_meta, my_cluster, 
                   radius_min_mpc, radius_max_mpc, mag_bin_specs):
     """
     From the tile galcat in memory, selects objects in relevant 
@@ -1675,7 +1685,7 @@ def local_galcat (data_gal_tile, galcat_keys, hpx_meta, my_cluster,
     dmagmax = magmax - my_cluster['mstar']
     dmagmin = my_cluster['mstar'] - magmin
 
-    local_cat = general_local_galcat(data_gal_tile, galcat_keys, 
+    local_cat = general_local_galcat(pmem_cfg, data_gal_tile, galcat_keys, 
                                      hpx_meta, my_cluster, 
                                      radius_max_mpc, nsig, dmagmin, dmagmax)
     t = Table(local_cat)
@@ -1688,10 +1698,10 @@ def local_galcat (data_gal_tile, galcat_keys, hpx_meta, my_cluster,
     radius_bkg_min_deg = np.degrees(radius_min_mpc / conv_factor)
     radius_bkg_max_deg = np.degrees(radius_max_mpc / conv_factor)
     ra, dec = t[galcat_keys['key_ra']], t[galcat_keys['key_dec']]
-    hpix_gal = t['hpix_gal']
+    hpix_gal = t['hpix_tmp']
     in_cone = cond_in_disc(
         ra, dec, hpix_gal, 
-        hpx_meta['Nside'], hpx_meta['nest'], 
+        pmem_cfg['Nside_tmp'], pmem_cfg['nest_tmp'], 
         racl, deccl, radius_bkg_min_deg
     )
     dist2cl_mpc = np.ones(len(t))*radius_max_mpc
@@ -1720,8 +1730,8 @@ def local_galcat_zp_test (data_gal_tile, galcat_keys, my_cluster, hpx_meta):
     mag0 = data_gal_tile[galcat_keys['key_mag']]
     #hpix_gal0 = radec2hpix(ra0, dec0, hpx_meta['Nside'], hpx_meta['nest'])
     hpix_gal0 = hp.ang2pix(
-        hpx_meta['Nside'],ra0, dec0, hpx_meta['nest'], lonlat=True)
-
+        hpx_meta['Nside'],ra0, dec0, hpx_meta['nest'], lonlat=True
+    )
     racl, deccl = my_cluster['racl'], my_cluster['deccl']
     zcl = my_cluster['zcl']
     mstar = my_cluster['mstar']
@@ -2176,42 +2186,89 @@ def data_gal_tile_from_mosaic (galcat_mosaic_specs, galcat_keys,
                                       racl, deccl, radius_max_deg)
 
 
-def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
-              data_fp, hpx_meta, data_gal, galcat, 
-              sig_dz0, cosmo_params, mstar_filename, out_paths, verbose):
+def pmem_tile(admin, tile_specs,
+              pmem_cfg, data_cls_analysis, data_cls_all, clcat,
+              footprint, galcat, maglim, 
+              sig_dz0, cosmo_params, mstar_filename, out_paths, verbose,
+              dat_galcat=None, dat_footprint=None): 
 
-    workdir = out_paths['workdir_loc'] 
-    path = out_paths['pmem']
-    photoz_support = pmem_cfg['photoz_support']    
-    galcat_keys = galcat['keys']
+    workdir = out_paths['workdir']
+    if admin['target_mode']:
+        tile_dir = workdir 
+    else:
+        tile_dir = os.path.join(
+            workdir, 'tiles', 'tile_'+str(int(tile_specs['id'])).zfill(5)
+        )
+        print ('..... Tile ', int(tile_specs['id']))
 
-    data_gal = add_hpx_to_cat(
-        data_gal, 
-        data_gal[galcat['keys']['key_ra']], 
-        data_gal[galcat['keys']['key_dec']],
-        hpx_meta['Nside'], hpx_meta['nest'], 'hpix_gal'
-    )
+    if os.path.isfile(os.path.join(
+            tile_dir, out_paths['pmem']['results'], "clusters.fits"
+    )):
+        return
 
+    if not admin['target_mode']:
+        create_directory(tile_dir)
+        create_tile_directories(tile_dir, out_paths['pmem'])
+
+    out_paths['workdir_loc'] = tile_dir # local update 
+    if dat_galcat is None:
+        data_gal_tile, data_fp_tile = make_tile_cat(
+            tile_specs,
+            galcat, footprint,
+            maglim, pmem_cfg
+        )        
+        if verbose >=2:
+            t = Table (data_gal_tile)
+            t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
+            t = Table (data_fp_tile)
+            t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
+    else:   
+        data_gal_tile, data_fp_tile = dat_galcat, dat_footprint
+
+    if not admin['target_mode']:
+        # extract clusters in tile
+        data_cls_tile = read_sources_in_hpixs(
+            data_cls_all, clcat['keys'],
+            tile_specs['hpix_tile'], tile_specs['Nside'], tile_specs['nest']
+        )
+        data_cls_analysis_tile = read_sources_in_hpixs(
+            data_cls_analysis, clcat['keys'],
+            tile_specs['hpix_core'], tile_specs['Nside'], tile_specs['nest']
+        )
+    else:
+        data_cls_tile = np.copy(data_cls_all)
+        data_cls_analysis_tile = np.copy(data_cls_analysis)
+    print ('Pmem / Nr of clusters in tile ', len(data_cls_tile))
+    
+    # if already computed exit
+    if len(data_cls_tile) > 0:
+        if os.path.isfile(
+                os.path.join(
+                    tile_dir, 
+                    out_paths['pmem']['results'], 
+                    "richness.fits")):
+            return
+    
     # Initialize output table "richness"
     data_richness = init_richness_output(
-        data_cls_analysis, pmem_cfg['richness_specs'], clcat_keys
+        data_cls_analysis_tile, pmem_cfg['richness_specs'], clcat['keys']
     )
     data_members, data_members_tile = None, None 
     flag_init_members = 0
     data_for_calib = None
     flag_init_calib = 0
 
-    for i in range(0, len(data_cls_analysis)):
+    for i in range(0, len(data_cls_analysis_tile)):
 
-        data_cluster = data_cls_analysis[i]
-        idcl =  data_cluster[clcat_keys['key_id']]
-        racl =  data_cluster[clcat_keys['key_ra']]
-        deccl = data_cluster[clcat_keys['key_dec']]
-        zcl =   data_cluster[clcat_keys['key_zp']]
+        data_cluster = data_cls_analysis_tile[i]
+        idcl =  data_cluster[clcat['keys']['key_id']]
+        racl =  data_cluster[clcat['keys']['key_ra']]
+        deccl = data_cluster[clcat['keys']['key_dec']]
+        zcl =   data_cluster[clcat['keys']['key_zp']]
 
         if verbose>=1:
             print ('')
-            print ('( '+str(i+1)+'/'+str(len(data_cls_analysis))+\
+            print ('( '+str(i+1)+'/'+str(len(data_cls_analysis_tile))+\
                    ' )   Cluster ID = '+str(idcl)+\
                    '      ra = '+str(round(racl,3))+\
                    '      dec = '+str(round(deccl,3))+\
@@ -2224,14 +2281,16 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
 
         # build "my_cluster" dictionary that describes the useful cl ppties. 
         my_cluster = build_my_cluster (
-            i, data_cluster, clcat_keys, pmem_cfg['photoz_support'], sig_dz0, 
+            i, data_cluster,
+            clcat['keys'], pmem_cfg['photoz_support'], sig_dz0, 
             pmem_cfg['mag_bin_specs'], pmem_cfg['pmem_specs'], 
             pmem_cfg['richness_specs'], mstar_filename, cosmo_params
         )
 
         # local working galcat & footprints 
         data_lgal = local_galcat(
-            data_gal, galcat['keys'], hpx_meta, my_cluster, 
+            pmem_cfg, 
+            data_gal_tile, galcat['keys'], footprint, my_cluster, 
             pmem_cfg['bkg_specs']['radius_min_mpc'], 
             pmem_cfg['bkg_specs']['radius_max_mpc'], 
             pmem_cfg['mag_bin_specs']
@@ -2242,11 +2301,11 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
             data_richness['flag_pmem'][i] = 2
             continue
         data_lfp = local_footprint(
-            my_cluster, data_fp, hpx_meta, pmem_cfg['bkg_specs']
+            my_cluster, data_fp_tile, footprint, pmem_cfg['bkg_specs']
         )
         data_lfp_mask, ncl_masked = footprint_with_cl_masks(
-            my_cluster, data_cls_all, clcat_keys, 
-            pmem_cfg['periphery_specs'], data_lfp, hpx_meta
+            my_cluster, data_cls_tile, clcat['keys'], 
+            pmem_cfg['periphery_specs'], data_lfp, footprint
         ) 
         if verbose>=1:
             print ('    Nr of masked clusters in periphery : ', ncl_masked)
@@ -2254,12 +2313,12 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
         # test cluster and bkg coverage
         cl_cfc, cl_wcfc = compute_cl_coverfracs(
             my_cluster, pmem_cfg['weighted_coverfrac_specs'], 
-            data_lfp, hpx_meta, cosmo_params
+            data_lfp, footprint, cosmo_params
         )
 
         bkg_cfc, bkg_wmask_cfc, bkg_area_deg2 = compute_bkg_coverfracs(
             pmem_cfg['bkg_specs'], my_cluster, 
-            data_lfp, data_lfp_mask, hpx_meta
+            data_lfp, data_lfp_mask, footprint
         )
 
         if verbose>=1: 
@@ -2277,28 +2336,28 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
         # generate footprint plot 
         if verbose >= 2:
             plot_footprint(
-                my_cluster, data_lfp, hpx_meta, 
+                my_cluster, data_lfp, footprint, 
                 pmem_cfg['bkg_specs']['radius_min_mpc'], 
                 pmem_cfg['bkg_specs']['radius_max_mpc'], 
                 pmem_cfg['weighted_coverfrac_specs']['radius_mpc'], 
                 bkg_cfc, cl_cfc, cl_wcfc, 
                 os.path.join(
-                    workdir, 
-                    path['plots'], 
+                    out_paths['workdir_loc'], 
+                    out_paths['pmem']['plots'], 
                     'footprint_cl'+str(idcl)+'.png'
                 )
             )
 
             if ncl_masked > 0:
                 plot_footprint(
-                    my_cluster, data_lfp_mask, hpx_meta, 
+                    my_cluster, data_lfp_mask, footprint, 
                     pmem_cfg['bkg_specs']['radius_min_mpc'], 
                     pmem_cfg['bkg_specs']['radius_max_mpc'], 
                     pmem_cfg['weighted_coverfrac_specs']['radius_mpc'],
                     bkg_wmask_cfc, cl_cfc, cl_wcfc,
                     os.path.join(
-                        workdir, 
-                        path['plots'], 
+                        out_paths['workdir_loc'], 
+                        out_paths['pmem']['plots'], 
                         'footprint_with_clmask_cl'+str(idcl)+'.png'
                     )
                 )
@@ -2319,11 +2378,11 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
 
 
         data_richness, data_members = pmem_1cluster(
-            i, pmem_cfg, my_cluster, data_lfp, data_lfp_mask, hpx_meta, 
+            i, pmem_cfg, my_cluster, data_lfp, data_lfp_mask, footprint, 
             data_lgal, galcat, bkg_area_deg2, cosmo_params, out_paths, 
             data_richness, verbose
         )
-
+        #print ('MEM ', data_members)
         # concatenate data_members 
         if data_members is not None:
             if flag_init_members == 0:
@@ -2334,11 +2393,14 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
                     (data_members_tile,  data_members)
                 )
 
-        # in calib_dz mode produce list of galaxies in 1Mpc cylinders around clusters with SNR>SNRlim
+        # in calib_dz mode :
+        # produce list of galaxies in 1Mpc cylinders
+        # around clusters with SNR>SNRlim
         if (pmem_cfg['calib_dz']['mode'] and 
             my_cluster['snr_cl']>pmem_cfg['calib_dz']['snr_min']): 
             data_for_calib = prepare_data_calib_dz(
-                my_cluster, pmem_cfg, hpx_meta, data_gal, galcat['keys']
+                my_cluster, pmem_cfg, footprint,
+                data_gal_tile, galcat['keys']
             )
             if data_for_calib is not None:
                 if flag_init_calib == 0:
@@ -2352,12 +2414,30 @@ def pmem_tile(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
             t = Table (data_for_calib_tile)
             t.write(
                 os.path.join(
-                    workdir, 
+                    out_paths['workdir_loc'], 
                     pmem_cfg['calib_dz']['filename']
                 ),
                 overwrite=True
             )
 
+    # write outputs to fits
+    t = Table (data_richness)
+    t.write(
+        os.path.join(
+            tile_dir, 
+            out_paths['pmem']['results'], 
+            "richness.fits"
+        ),overwrite=True
+    )
+    t = Table (data_members_tile)
+    t.write(
+        os.path.join(
+            tile_dir, 
+            out_paths['pmem']['results'], 
+            "pmem.fits"
+        ),overwrite=True
+    )
+            
     return data_richness, data_members_tile
 
 
@@ -2366,9 +2446,6 @@ def pmem_list(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
               sig_dz0, cosmo_params, mstar_filename, out_paths, verbose):
 
     workdir = out_paths['workdir_loc'] 
-    path = out_paths['pmem']
-    photoz_support = pmem_cfg['photoz_support']    
-    galcat_keys = galcat['keys']
 
     # Initialize output table "richness"
     data_richness = init_richness_output(
@@ -2485,7 +2562,7 @@ def pmem_list(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
                 bkg_cfc, cl_cfc, cl_wcfc, 
                 os.path.join(
                     workdir, 
-                    path['plots'], 
+                    out_paths['pmem']['plots'], 
                     'footprint_cl'+str(idcl)+'.png'
                 )
             )
@@ -2499,7 +2576,7 @@ def pmem_list(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
                     bkg_wmask_cfc, cl_cfc, cl_wcfc,
                     os.path.join(
                         workdir, 
-                        path['plots'], 
+                        out_paths['pmem']['plots'], 
                         'footprint_with_clmask_cl'+str(idcl)+'.png'
                     )
                 )
@@ -2537,7 +2614,7 @@ def pmem_1cluster(cl_index, pmem_cfg, my_cluster, data_fp, data_fp_mask,
                   footprint, data_gal, galcat, bkg_area_deg2,
                   cosmo_params, out_paths, data_richness, verbose):
 
-    workdir, path = out_paths['workdir_loc'], out_paths['pmem']
+    workdir = out_paths['workdir_loc']
     data_members = None
     i = cl_index
     
@@ -2585,7 +2662,7 @@ def pmem_1cluster(cl_index, pmem_cfg, my_cluster, data_fp, data_fp_mask,
             data_fp_mask, footprint,
             os.path.join(
                 workdir, 
-                path['plots'], 
+                out_paths['pmem']['plots'], 
                 'mag_counts_cl'+my_cluster['idcl']+'.png'
             )
         )
@@ -2698,8 +2775,9 @@ def pmem_1cluster(cl_index, pmem_cfg, my_cluster, data_fp, data_fp_mask,
     data_members['ra']       = data_gal[galcat['keys']['key_ra']][cond_pmem]
     data_members['dec']      = data_gal[galcat['keys']['key_dec']][cond_pmem]
     data_members['zp']       = data_gal[galcat['keys']['key_zp']][cond_pmem]
-    data_members['zp-zcl_over_sig_dz'] = (data_gal[galcat['keys']['key_zp']][cond_pmem] -\
-                                          my_cluster['zcl'])/my_cluster['sig_dz']
+    data_members['zp-zcl_over_sig_dz'] = \
+        (data_gal[galcat['keys']['key_zp']][cond_pmem] -\
+         my_cluster['zcl'])/my_cluster['sig_dz']
     data_members['mag']      =  data_gal[galcat['keys']['key_mag']][cond_pmem]
     data_members['mag-mstar'] = data_gal[galcat['keys']['key_mag']][cond_pmem] -\
                                 my_cluster['mstar']
@@ -2733,7 +2811,7 @@ def tile_radius_pmem(admin, pmem_cfg, cosmo_params):
     return tile_radius
 
 
-def eff_tiles_for_pmem(data_cls, clcat, tiles, admin):
+def eff_tiles_for_pmem(data_cls, clcat, tiles):
     flag = np.zeros(len(tiles))
     for it in range(0, len(tiles)):
         for j in range(0, tiles['nhpix'][it]):
@@ -2748,125 +2826,6 @@ def eff_tiles_for_pmem(data_cls, clcat, tiles, admin):
             if len(data_cls_tile)>0:
                 flag[it] = 1
     return tiles[flag==1]
-
-
-def run_pmem_tile(config, dconfig, thread_id):
-    # read config file
-    with open(config) as fstream:
-        param_cfg = yaml.safe_load(fstream)
-    with open(dconfig) as fstream:
-        param_data = yaml.safe_load(fstream)
-
-    survey, ref_filter  = param_cfg['survey'], param_cfg['ref_filter']
-    maglim = param_cfg['maglim_pmem']
-    galcat = param_data['galcat'][survey]
-    clcat = param_data['clcat'][param_cfg['clusters']]
-    out_paths = param_cfg['out_paths']
-    admin = param_cfg['admin']
-    footprint = param_data['footprint'][survey]
-    zp_metrics = param_data['zp_metrics'][survey][ref_filter]
-    magstar_file = param_data['magstar_file'][survey][ref_filter]
-    workdir = out_paths['workdir']
-    data_cls = read_FitsCat(param_data['clcat'][param_cfg['clusters']]['cat'])
-    all_tiles = read_FitsCat(
-        os.path.join(workdir, admin['tiling']['tiles_filename'])
-    )
-    tiles = all_tiles[(all_tiles['thread_id']==int(thread_id))]    
-    print ('THREAD ', int(thread_id))
-
-    # select correct magnitude 
-    for it in range(0, len(tiles)):
-        tile_dir = os.path.join(
-            workdir, 
-            'tiles', 
-            'tile_'+str(int(tiles['id'][it])).zfill(3)
-        )
-        print ('..... Tile ', int(tiles['id'][it]))
-
-        create_directory(tile_dir)
-        create_pmem_directories(tile_dir, out_paths['pmem'])
-        out_paths['workdir_loc'] = tile_dir # local update 
-        #tile_radius_deg = tile_radius_pmem(
-        #    admin, param_cfg['pmem_cfg'], param_cfg['cosmo_params']
-        #)
-        tile_radius_deg = tiles['radius_tile_deg'][it]
-        data_gal_tile = read_mosaicFitsCat_in_disc(
-            galcat, tiles[it], tile_radius_deg
-        )   
-        data_gal_tile = data_gal_tile\
-                        [data_gal_tile[galcat['keys']['key_mag']]<=maglim]
-
-        data_fp_tile = read_mosaicFootprint_in_disc(
-            footprint, tiles[it], tile_radius_deg
-        )
-        tile_specs = create_tile_specs(
-            tiles[it], admin, 
-            None, None, 
-            data_fp_tile, footprint
-        )
-
-        data_cls_disc = filter_disc_tile(data_cls, clcat, tiles[it])
-        
-        data_cls_tile = []
-        for j in range(0, tiles['nhpix'][it]):
-            tile_specs = {
-                'Nside':tiles['Nside'][it],
-                'nest': tiles['nest'][it],
-                'hpix': tiles['hpix'][it][j]
-            }
-            if j == 0:
-                data_cls_tile = filter_hpx_tile(data_cls, clcat, tile_specs)
-            else:
-                data_cls_tile = np.hstack((
-                data_cls_tile, 
-                filter_hpx_tile(data_cls, clcat, tile_specs)
-                ))
-
-        print ('Nr of clusters in tile ', len(data_cls_tile))
-
-
-        '''
-        t = Table (data_gal_tile)#, names=names)
-        t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
-        t = Table (data_fp_tile)#, names=names)
-        t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
-        '''
-
-        if len(data_cls_tile) > 0:
-            if not os.path.isfile(
-                    os.path.join(
-                        tile_dir, 
-                        out_paths['pmem']['results'], 
-                        "richness.fits"
-                    )
-            ):
-                data_richness, data_members = pmem_tile(
-                    param_cfg['pmem_cfg'], 
-                    data_cls_tile, data_cls, clcat['keys'], 
-                    data_fp_tile, footprint, 
-                    data_gal_tile, galcat, 
-                    zp_metrics['sig_dz0'], param_cfg['cosmo_params'],
-                    magstar_file, out_paths, param_cfg['verbose']
-                )
-
-                # write outputs to fits
-                t = Table (data_richness)#, names=names)
-                t.write(
-                    os.path.join(
-                        tile_dir, 
-                        out_paths['pmem']['results'], 
-                        "richness.fits"
-                    ),overwrite=True
-                )
-                t = Table (data_members)#, names=names)
-                t.write(
-                    os.path.join(
-                        tile_dir, 
-                        out_paths['pmem']['results'], 
-                        "pmem.fits"
-                    ),overwrite=True
-                )
-    return
 
 
 def run_pmem_list(data_cls, config, dconfig, thread_id):
@@ -2939,8 +2898,8 @@ def concatenate_calib_dz(all_tiles, pmem_cfg, workdir, calib_file):
     print ('Concatenate Calib files')
     list_calibs = []
     for it in range(0, len(all_tiles)):
-        tile_dir = tile_dir_name(
-            workdir, int(all_tiles['id'][it]) 
+        tile_dir = os.path.join(
+            workdir, 'tiles', 'tile_'+str(int(all_tiles['id'][it])).zfill(5)
         )
         if os.path.isfile(
                 os.path.join(tile_dir, pmem_cfg['calib_dz']['filename'])
@@ -2959,8 +2918,9 @@ def pmem_concatenate_tiles(all_tiles, out_paths, rich_file, pmem_file):
     list_clusters = []
     list_members = []
     for it in range(0, len(all_tiles)):
-        tile_dir = tile_dir_name(
-            out_paths['workdir'], int(all_tiles['id'][it]) 
+        tile_dir = os.path.join(
+            out_paths['workdir'],
+            'tiles', 'tile_'+str(int(all_tiles['id'][it])).zfill(5)
         )
         list_clusters.append(
             os.path.join(tile_dir, out_paths['pmem']['results'])

@@ -1,18 +1,91 @@
-import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
 import astropy.io.fits as fits
-import os, sys
-from astropy.cosmology.core import FlatLambdaCDM as flat
+import yaml, os, sys, subprocess, time
+from astropy.cosmology import FlatLambdaCDM as flat
 from astropy import units as u
-from astropy.convolution import convolve,Gaussian1DKernel
 import healpy as hp
 from math import log, exp, atan, atanh
 from astropy.table import Table
-from scipy.optimize import least_squares
-from scipy import interpolate
 from sklearn import cluster
 
+
+def create_slurm_script(task, config, dconfig, narray, script):
+    with open(config) as fstream:
+        param_cfg = yaml.safe_load(fstream)
+    slurm_cfg = param_cfg['admin']['slurm']
+
+    print ('...task = ', task)
+    print (
+        '      ntiles / max nthreads = ',
+        narray, slurm_cfg['max_parallel']
+    )
+
+    scr = __file__.replace('lib/utils.py', '')
+
+    f = open(f"{script}", "w")
+    f.write("#!/bin/sh\n")
+    f.write(f"#SBATCH --job-name={task}\n")
+    f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
+    if narray<=slurm_cfg['max_parallel']:
+        f.write(f"#SBATCH --ntasks={narray}\n")
+    else
+        f.write(f"#SBATCH --ntasks={slurm_cfg['max_parallel']}\n")
+    if narray > 1:
+        f.write(
+            f"#SBATCH --cpus-per-task={slurm_cfg['cpus-per-task']}\n"
+        )
+        f.write(
+            f"#SBATCH --array=0-{narray-1}%{slurm_cfg['max_parallel']}\n"
+        )
+    f.write(f"#SBATCH --mem={slurm_cfg['memory'][task]}G\n")
+    if narray > 1:
+        f.write(f"python {scr}{task}.py {config} {dconfig} $SLURM_ARRAY_TASK_ID\n")
+    else:
+        f.write(f"python {scr}{task}.py  {config} {dconfig} 0\n")
+    f.close()
+    return 
+    
+
+def slurm_submit(task, config, dconfig, narray=1, dep=None):
+
+    if dep is not None:
+        time.sleep(3)
+
+    create_slurm_script(task, config, dconfig, narray, f"job_{task}.sh")    
+    if dep is not None:
+        cmd = f"sbatch --depend=afterany:{dep} job_{task}.sh"
+    else:
+        cmd = f"sbatch job_{task}.sh"
+
+    res = subprocess.run(cmd, shell=True, capture_output=True)
+    job_id = str(res.stdout).split("batch job ")[1].split("\\")[0]
+    return job_id
+
+
+def make_tile_cat(tile_specs, sourcecat, footprint, maglim, wcfg):
+    
+    data_gal_tile = read_hpix_mosaicFitsCat(
+        tile_specs['hpix_tile'], 
+        sourcecat['mosaic']['dir']
+    )
+    data_gal_tile = data_gal_tile\
+                    [data_gal_tile[sourcecat['keys']['key_mag']]<=\
+                     np.float64(maglim)]
+
+    data_fp_tile = read_hpix_mosaicFootprint(
+        tile_specs['hpix_tile'], 
+        footprint['mosaic']['dir']
+    )
+
+    # add hpx to galcat to speed up condition_in_disc around all detections
+    data_gal_tile = add_hpx_to_cat(
+        data_gal_tile,
+        data_gal_tile[sourcecat['keys']['key_ra']], 
+        data_gal_tile[sourcecat['keys']['key_dec']],
+        wcfg['Nside_tmp'], wcfg['nest_tmp'], 'hpix_tmp'
+    )
+    return data_gal_tile, data_fp_tile
 
 
 def create_directory(dir):
@@ -52,16 +125,21 @@ def read_FitsFootprint(hpx_footprint, hpx_meta):
         _type_: _description_
     """
 
-    hdulist=fits.open(hpx_footprint)
-    dat = hdulist[1].data
-    hdulist.close()
+    dat = read_FitsCat(hpx_footprint)
     hpix_map = dat[hpx_meta['key_pixel']].astype(int)
-    if hpx_meta['key_frac'] == 'none':
-        frac_map = np.ones(len(hpix_map0)).astype(float)
+    if hpx_meta['key_frac'] is None:
+        frac_map = np.ones(len(hpix_map)).astype(float)
     else:
         frac_map = dat[hpx_meta['key_frac']]
     return  hpix_map, frac_map
 
+
+def read_sources_in_hpixs(dat, keys, hpix_arr, Nside, nest):
+    hpix = hp.ang2pix(
+        Nside, dat[keys['key_ra']], dat[keys['key_dec']],
+        nest, lonlat=True)
+    return dat[np.isin(hpix, hpix_arr)]
+    
 
 def read_hpix_mosaicFitsCat(hpix_arr, datadir):
 
@@ -348,8 +426,12 @@ def create_mosaic_footprint(footprint, fpath):
         fpath (_type_): _description_
     """
     # from a survey footprint create a mosaic of footprints at lower resol.
-    if not os.path.exists(fpath):
-        os.mkdir(fpath)
+    if os.path.exists(fpath):
+        return
+    
+    create_directory(fpath)
+    print ('Create footprint mosaic')
+    create_directory(fpath)
     hpix0, frac0 = read_FitsFootprint(
         footprint['survey_footprint'], footprint
     )
@@ -368,19 +450,19 @@ def create_mosaic_footprint(footprint, fpath):
                 array = hpix0[np.isin(hpix, hpu)]
             ),
             fits.Column(
-                name='ra',       
-                format='E',
-                array= ra0[np.isin(hpix, hpu)]
+                name = 'ra',       
+                format = 'D',
+                array = ra0[np.isin(hpix, hpu)]
             ),
             fits.Column(
-                name='dec',      
-                format='E',
-                array= dec0[np.isin(hpix, hpu)]
+                name = 'dec',      
+                format = 'D',
+                array = dec0[np.isin(hpix, hpu)]
             ),
             fits.Column(
-                name=footprint['key_frac'],   
-                format='K',
-                array= frac0[np.isin(hpix, hpu)]
+                name = footprint['key_frac'],   
+                format = 'E',
+                array = frac0[np.isin(hpix, hpu)]
             )
         ])
         hdu = fits.BinTableHDU.from_columns(all_cols)
@@ -401,14 +483,13 @@ def concatenate_fits(flist, output):
     Returns:
         _type_: _description_
     """
-
     for i in range (0, len(flist)):
         dat = read_FitsCat(flist[i])
         if i == 0:
             cdat = np.copy(dat)
         else:
             cdat = np.append(cdat, dat)
-    t = Table(cdat)#, names=names)
+    t = Table(cdat)
     t.write(output, overwrite=True)
     return cdat
 
@@ -447,10 +528,7 @@ def add_key_to_fits(fitsfile, key_val, key_name, key_type):
         key_name (_type_): _description_
         key_type (_type_): _description_
     """
-    hdulist = fits.open(fitsfile)
-    dat=hdulist[1].data
-    hdulist.close()
-
+    dat = read_FitsCat(fitsfile)
     orig_cols = dat.columns
     if key_type == 'float':
         new_col = fits.ColDefs([
@@ -883,7 +961,7 @@ def scan_survey_ra(hpix, Nside, nest):
     ra, dec = hp.pix2ang(
         Nside, hpix, nest, lonlat=True 
     )
-    size = 1.5*hp.pixelfunc.nside2pixarea(Nside, degrees=True)**0.5
+    size = 1.5*hp.nside2pixarea(Nside, degrees=True)**0.5
     ramin, ramax = np.amin(ra), np.amax(ra)
     if ramin < size and 360.-ramax < size:
         ra0_crossing = True
@@ -922,7 +1000,7 @@ def tile_radius(hplist, Nside, nest):
             racen, deccen
         )
     )
-    half_pix_size = 0.5*1.45*hp.pixelfunc.nside2pixarea(
+    half_pix_size = 0.5*1.45*hp.nside2pixarea(
             Nside, degrees=True
         )**0.5
     radius_deg = np.amax(dcen) + half_pix_size
@@ -930,11 +1008,24 @@ def tile_radius(hplist, Nside, nest):
     return radius_deg
 
 
-def sky_partition(tiling, gdir, footprint, outdir):
+def sky_partition(tiling, gdir, footprint, workdir):
 
-    print ('Sky partition')
+    if tiling['ntiles'] > 0:
+        print ('Sky partition for characterization')
+    else:
+        print ('Sky partition for detection')
 
-    tile_area = tiling['mean_area_deg2']
+    if os.path.isfile(
+            os.path.join(
+                workdir, tiling['rpath'],
+                tiling['tiles_filename'])):
+        ntiles = len(read_FitsCat(
+            os.path.join(
+                workdir, tiling['rpath'],
+                tiling['tiles_filename'])))
+        print ('.....Nr. of Tiles = ', ntiles)
+        return ntiles
+        
     overlap_deg = tiling['overlap_deg']
     Nside = tiling['Nside']
     nest = tiling['nest']
@@ -945,17 +1036,23 @@ def sky_partition(tiling, gdir, footprint, outdir):
     hpix_fits = np.array(
         [os.path.splitext(x)[0] for x in raw_list]
     ).astype(int)
-
     ra0_crossing, ra_split = scan_survey_ra(hpix_fits, Nside, nest)
+    if tiling['ntiles'] > 0:
+        ntiles = tiling['ntiles']
+    else:
+        # estimate the number of tiles from the desired tile area 
+        tile_area = tiling['mean_area_deg2']
+        area_pix = hp.nside2pixarea(Nside, degrees=True)
+        npix = len(hpix_fits)
+        ntiles = int(npix*area_pix/tile_area)
+    print ('.....Nr. of Tiles = ', ntiles)
 
+    
     # partition
     if not os.path.isfile(
-            os.path.join(outdir, tiling['sky_partition_npy'])):
-        # estimate the number of tiles from the desired tile area 
-        area_pix = hp.pixelfunc.nside2pixarea(Nside, degrees=True)
-        npix = len(hpix_fits)
-        n_clusters = int(npix*area_pix/tile_area)
-        print ('Nr. of Tiles = ', n_clusters)
+            os.path.join(
+                workdir, tiling['rpath'],
+                tiling['sky_partition_npy'])):
 
         # partitionning with KMeans algorithm and save hpix's in npy
         hp_ra0, hp_dec0 = hp.pix2ang(
@@ -964,13 +1061,12 @@ def sky_partition(tiling, gdir, footprint, outdir):
             nest, 
             lonlat=True
         )
-
         if ra0_crossing:
             hp_ra0[hp_ra0>ra_split] = hp_ra0[hp_ra0>ra_split] - 360.
         hp_ra = hp_ra0*np.cos(np.radians(hp_dec0))
         hp_dec = hp_dec0
         coords = np.concatenate([[hp_ra], [hp_dec]]).T
-        kmeans = cluster.KMeans(n_clusters=n_clusters, n_init=10)
+        kmeans = cluster.KMeans(n_clusters=ntiles, n_init=10)
         kmeans.fit(coords)
         labels = kmeans.labels_
         partition=[]
@@ -980,10 +1076,11 @@ def sky_partition(tiling, gdir, footprint, outdir):
             partition.append(hp_lab)
         np.save(
             os.path.join(
-                outdir, tiling['sky_partition_npy']
+                workdir, tiling['rpath'],
+                tiling['sky_partition_npy']
             ), np.array(partition, dtype=object)
         )
-
+        
         # ra-dec plot of the partition
         plt.clf()
         plt.figure(figsize=(8, 8))
@@ -992,37 +1089,48 @@ def sky_partition(tiling, gdir, footprint, outdir):
         )
         plt.xlabel('R.A. [deg]')
         plt.ylabel('Dec. [deg]')
-        plt.title('Sky partinioning : '+str(n_clusters)+' tiles')
-        plt.savefig(os.path.join(outdir,'partition.png'))
+        plt.title('Sky partinioning : '+str(ntiles)+' tiles')
+        plt.savefig(os.path.join(
+            workdir,tiling['rpath'], 'partition.png'
+        ))
 
 
     # compute the tile overlaps and save lists of hpix's in npy
-    if not os.path.isfile(os.path.join(outdir, tiling['tiles_npy'])):
+    if not os.path.isfile(os.path.join(
+            workdir, tiling['rpath'], tiling['tiles_npy'])):
 
         # compute the number of layers for the overlap
         N_layers = 1+int(
-            overlap_deg / hp.pixelfunc.nside2pixarea(Nside, degrees=True)**0.5
+            overlap_deg / hp.nside2pixarea(Nside, degrees=True)**0.5
         )
-        overlap_eff_size = N_layers*1.42*hp.pixelfunc.nside2pixarea(
+        overlap_eff_size = N_layers*1.42*hp.nside2pixarea(
             Nside, degrees=True
         )**0.5
 
         partition = np.load(
-            os.path.join(outdir,tiling['sky_partition_npy']), allow_pickle=True
+            os.path.join(
+                workdir,tiling['rpath'],
+                tiling['sky_partition_npy']), allow_pickle=True
         )
         hpix_tiles = []
-        print ('Nr. of Tiles = ', len(partition))
+        
+        ntiles = len(partition)
+        print ('......Nr. of Tiles = ', ntiles)
 
-        for i in range(0, len(partition)):
-            if (i % 10) == 0:
-                print ('......Tile ',i, ' / ', len(partition))
-            hp_lab = partition[i]
-            all_hp_neigh = np.array([]).astype('int')
+        for i in range(0, ntiles):
+
+            if (ntiles>10):
+                if (i % 10) == 0:
+                    print ('......Tile ',i, ' / ', ntiles)
+            else:
+                print ('......Tile ',i, ' / ', ntiles)    
+            hp_lab = np.array(partition[i]).astype(int)
+            all_hp_neigh = np.array([]).astype(int)
             for j in range(0, N_layers):
                 hp_tile = np.hstack((hp_lab, all_hp_neigh))
                 all_hp = np.unique(
                     np.concatenate(
-                        hp.pixelfunc.get_all_neighbours(
+                        hp.get_all_neighbours(
                             Nside, hp_tile, nest=True
                         )
                     ).ravel()
@@ -1034,21 +1142,26 @@ def sky_partition(tiling, gdir, footprint, outdir):
                 all_hp_neigh = np.hstack((all_hp_neigh, hp_neigh))
                 if tiling['plot_tiles']:
                     plot_tile(i, hp_lab, all_hp_neigh, hpix_fits, \
-                              Nside, nest, overlap_eff_size, outdir)
+                              Nside, nest, overlap_eff_size,
+                              os.path.join(workdir, tiling['rpath']))
             hpix_tiles.append(np.hstack((hp_lab, all_hp_neigh)))
         
         np.save(
             os.path.join(
-                outdir,tiling['tiles_npy']
+                workdir,tiling['rpath'], tiling['tiles_npy']
             ), np.array(hpix_tiles, dtype=object)
         )
 
     # build tile fits file with effective areas racen, deccen
     partition = np.load(
-        os.path.join(outdir,tiling['sky_partition_npy']), allow_pickle=True
+        os.path.join(
+            workdir, tiling['rpath'],
+            tiling['sky_partition_npy']), allow_pickle=True
     )
     tiles = np.load(
-        os.path.join(outdir,tiling['tiles_npy']), allow_pickle=True
+        os.path.join(
+            workdir,tiling['rpath'],
+            tiling['tiles_npy']), allow_pickle=True
     )
     ntiles = len(partition)
     npix_core = np.zeros(ntiles).astype('int')
@@ -1059,8 +1172,8 @@ def sky_partition(tiling, gdir, footprint, outdir):
     radius_deg = np.zeros(len(partition))
 
     for i in range(0, ntiles):
-        hp_core = partition[i]
-        hp_tile = tiles[i]
+        hp_core = np.array(partition[i]).astype(int)
+        hp_tile = np.array(tiles[i]).astype(int)
         npix_core[i] = len(hp_core)
         npix_tile[i] = len(hp_tile)
         racen[i], deccen[i] = tile_center(
@@ -1076,7 +1189,7 @@ def sky_partition(tiling, gdir, footprint, outdir):
             )
             area_core[i] += np.sum(hfrac)
         area_core[i] = area_core[i]*\
-                       hp.pixelfunc.nside2pixarea(
+                       hp.nside2pixarea(
                            footprint['Nside'], degrees=True)
         for hh in hp_tile:
             hpix, hfrac = read_FitsFootprint(
@@ -1084,7 +1197,7 @@ def sky_partition(tiling, gdir, footprint, outdir):
             )
             area_tile[i] += np.sum(hfrac)
         area_tile[i] = area_tile[i]*\
-                       hp.pixelfunc.nside2pixarea(
+                       hp.nside2pixarea(
                            footprint['Nside'], degrees=True)
 
     # plot area distributions
@@ -1115,12 +1228,12 @@ def sky_partition(tiling, gdir, footprint, outdir):
     data_tiles['radius_deg'] = radius_deg
     t = Table(data_tiles)
     t.write(
-        os.path.join(outdir, tiling['tiles_filename']), 
+        os.path.join(
+            workdir, tiling['rpath'],
+            tiling['tiles_filename']), 
         overwrite=True
     )
-
-
-    return
+    return ntiles
 
 
 def ra_shift(ra, ra0_crossing, ra360_crossing):
@@ -1186,7 +1299,7 @@ def plot_tile(
         racen = np.median(ra_core)
 
     radius = 1.+osize + 1.42*0.5*(len(hp_lab)*\
-                 hp.pixelfunc.nside2pixarea(Nside, degrees=True))**0.5
+                 hp.nside2pixarea(Nside, degrees=True))**0.5
     ramin, ramax, decmin, decmax = radec_window(racen, deccen, radius)
     ramin_ext, ramax_ext, decmin_ext, decmax_ext = radec_window(
         racen, deccen, radius+1.
@@ -1245,8 +1358,8 @@ def disc_coverfrac(ra, dec, radius_deg, dat_footprint, footprint):
     return float(len(pixels_in_disc[ind_in])) / float(len(pixels_in_disc))
 
 
-def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
-                      search_radius, radius_unit):
+def create_tile_specs(target_mode, tiling, tile,
+                      hpix_core_list, hpix_tile_list):
     """_summary_
 
     Args:
@@ -1258,38 +1371,15 @@ def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
         _type_: _description_
     """
 
-    if admin['target_mode']:
-        # coverfrac in  30 and 5 arcmin
-        coverfrac_30 = disc_coverfrac(
-            tile['ra'], tile['dec'], 0.5, dat_footprint, footprint
-        )
-        coverfrac_5 = disc_coverfrac(
-            tile['ra'], tile['dec'], 1./12., dat_footprint, footprint
-        )
-        hpix_core = np.array([-1])
-        hpix_tile = np.array([-1])
-        Nside, nest = -1, None
-        area_deg2 = np.round(area_ann_deg2(0., tile_radius_deg), 3)
-        eff_area_deg2 = disc_eff_area_deg2
-        if radius_unit == 'arcmin':
-            radius_filter_deg = search_radius/60.
-        if radius_unit == 'mpc':
-            radius_filter_deg = np.degrees(
-                (search_radius/60.) / target['conv_factor']
-            )
-    else:
-        coverfrac_30 = -1.
-        coverfrac_5 = -1. 
-        hpix_core = hpix_core_list 
-        hpix_tile = hpix_tile_list 
-        Nside, nest = admin['tiling']['Nside'], admin['tiling']['nest']
-        radius_filter_deg = -1.
+    hpix_core = hpix_core_list 
+    hpix_tile = hpix_tile_list 
+    Nside, nest = tiling['Nside'], tiling['nest']
 
-        area_deg2 = float(tile['npix_core'])*\
-                    hp.pixelfunc.nside2pixarea(Nside, degrees=True)
-        eff_area_deg2 = tile['area_core_deg2']
-        framed_eff_area_deg2 = tile['area_tile_deg2']
-        tile_radius_deg = tile['radius_deg']
+    area_deg2 = float(tile['npix_core'])*\
+        hp.nside2pixarea(Nside, degrees=True)
+    eff_area_deg2 = tile['area_core_deg2']
+    framed_eff_area_deg2 = tile['area_tile_deg2']
+    tile_radius_deg = tile['radius_deg']
 
     tile_specs = {'id':tile['id'],
                   'ra': tile['ra'], 'dec': tile['dec'],
@@ -1300,13 +1390,56 @@ def create_tile_specs(tile, admin, hpix_core_list, hpix_tile_list,
                   'area_deg2': area_deg2,
                   'eff_area_deg2': eff_area_deg2,
                   'framed_eff_area_deg2': framed_eff_area_deg2,
-                  'radius_tile_deg': np.round(tile_radius_deg, 3), 
-                  'radius_filter_deg': np.round(radius_filter_deg, 3), 
-                  'coverfrac_30arcmin': np.round(coverfrac_30, 2),
-                  'coverfrac_5arcmin': np.round(coverfrac_5, 2),
-                  'target_mode': admin['target_mode'] }
+                  'radius_tile_deg': np.round(tile_radius_deg, 3)} 
 
     return tile_specs 
+
+
+def create_ptile_specs(target, radius, 
+                       search_radius, radius_unit,
+                       dat_footprint, footprint):
+    """_summary_
+        Create specs of pointed tile towrds given target
+
+    Args:
+        tile (_type_): _description_
+        tile_radius_deg (_type_): _description_
+        admin (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    # coverfrac in  30 and 5 arcmin
+    coverfrac_30 = disc_coverfrac(
+        target['ra'], target['dec'], 0.5, dat_footprint, footprint
+    )
+    coverfrac_5 = disc_coverfrac(
+        target['ra'], target['dec'], 1./12., dat_footprint, footprint
+    )
+    area_deg2 = np.round(area_ann_deg2(0., radius), 3)
+    eff_area_deg2 = disc_coverfrac(
+        target['ra'], target['dec'], radius, dat_footprint, footprint
+    )
+    if radius_unit == 'arcmin':
+        radius_filter_deg = search_radius/60.
+    if radius_unit == 'mpc':
+        radius_filter_deg = np.degrees(
+            (search_radius / target['conv_factor'])
+        )
+
+    ptile_specs = {'id': 0,
+                   'name': target['name'],
+                   'ra': target['ra'], 'dec': target['dec'],
+                   'area_deg2': area_deg2,
+                   'eff_area_deg2': eff_area_deg2,
+                   'framed_eff_area_deg2': eff_area_deg2,
+                   'radius_tile_deg': np.round(radius, 3), 
+                   'radius_filter_deg': np.round(radius_filter_deg, 3), 
+                   'coverfrac_30arcmin': np.round(coverfrac_30, 2),
+                   'coverfrac_5arcmin': np.round(coverfrac_5, 2)}
+
+    return ptile_specs 
 
 
 def cond_in_disc(rag, decg, hpxg, Nside, nest, racen, deccen, rad_deg):
@@ -1393,6 +1526,7 @@ def cond_in_hpx_disc(hpxg, Nside, nest, racen, deccen, rad_deg):
 def normal_distribution_function(x):
     value = scipy.stats.norm.pdf(x,mean,std)
     return value
+
 
 def compute_gaussian_kernel_1d(kernel):
 # kernel is an integer >0
@@ -1481,6 +1615,59 @@ def concatenate_members(all_tiles, list_path_members,
     t['tile'] = tile_for_members
     t.write(members_outfile, overwrite=True)
     return
+
+
+def tiles_with_clusters(out_paths, all_tiles, code):
+    """_summary_
+
+    Args:
+        out_paths (_type_): _description_
+        all_tiles (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+    workdir = out_paths['workdir']
+    flag = np.zeros(len(all_tiles))
+    for it in range(0, len(all_tiles)):
+        tile_dir = os.path.join(
+            workdir, 'tiles', 'tile_'+str(int(all_tiles['id'][it])).zfill(5)
+        )
+        if os.path.isfile(os.path.join(
+                tile_dir,
+                out_paths[code]['results'], "tile_info.fits"
+        )):
+            if read_FitsCat(os.path.join(
+                    tile_dir, out_paths[code]['results'], "tile_info.fits"
+            ))[0]['Nclusters'] > 0:
+                flag[it] = 1
+            else:
+                print ('warning : no detection in tile ', tile_dir)
+        else:
+            print ('warning : missing tile ', tile_dir)
+    return all_tiles[flag==1]
+
+
+def concatenate_cl_tiles(out_paths, all_tiles, code):
+
+    print ('Concatenate clusters')
+    workdir = out_paths['workdir']
+
+    eff_tiles = tiles_with_clusters(out_paths, all_tiles, code)
+
+    list_clusters = []
+    for it in range(0, len(eff_tiles)):
+        tile_dir = os.path.join(
+            workdir, 'tiles', 'tile_'+str(int(eff_tiles['id'][it])).zfill(5)
+        )
+        list_clusters.append(
+            os.path.join(tile_dir, out_paths[code]['results'])
+        )
+    data_clusters0 = concatenate_clusters(
+        list_clusters, 'clusters.fits', 
+        os.path.join(workdir, 'tmp', 'clusters0.fits')
+    )   
+    return data_clusters0
 
 
 def add_clusters_unique_id(data_clusters, clkeys):
