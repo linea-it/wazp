@@ -2,11 +2,11 @@ import numpy as np
 import yaml, os, sys
 from astropy.table import join
 
-from lib.utils import read_FitsCat
-from lib.wazp import tiles_with_clusters, official_wazp_cat
+from wazp.utils import read_FitsCat
+from wazp.detection import tiles_with_clusters, official_wazp_cat
 
-from lib.pmem import pmem_concatenate_tiles
-from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
+from wazp.pmem import pmem_concatenate_tiles
+from wazp.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
 
 # read config files as online arguments 

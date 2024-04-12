@@ -1,14 +1,14 @@
 import numpy as np
 import yaml, os, sys, json
 
-from lib.utils import sky_partition, read_FitsCat
-from lib.utils import create_mosaic_footprint
-from lib.utils import create_directory, update_data_structure
-from lib.utils import slurm_submit
+from wazp.utils import sky_partition, read_FitsCat
+from wazp.utils import create_mosaic_footprint
+from wazp.utils import create_directory, update_data_structure
+from wazp.utils import slurm_submit
 
-from lib.wazp import compute_zpslices, bkg_global_survey
-from lib.wazp import update_config, create_wazp_directories
-from lib.wazp import store_wazp_confs
+from wazp.detection import compute_zpslices, bkg_global_survey
+from wazp.detection import update_config, create_wazp_directories
+from wazp.detection import store_wazp_confs
 
 # read config files as online arguments 
 config = sys.argv[1]

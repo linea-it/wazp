@@ -1,9 +1,9 @@
 import numpy as np
 import yaml, os, sys
 
-from lib.utils import read_FitsCat, add_clusters_unique_id
-from lib.utils import concatenate_cl_tiles
-from lib.wazp import cl_duplicates_filtering
+from wazp.utils import read_FitsCat, add_clusters_unique_id
+from wazp.utils import concatenate_cl_tiles
+from wazp.detection import cl_duplicates_filtering
 
 
 # read config files as online arguments 
