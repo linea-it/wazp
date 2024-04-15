@@ -66,3 +66,36 @@ ipython kernel install --user --name=wazp
 ```
 
 
+## Installation v2 
+
+Create an environment with Conda:
+```bash
+conda create -n wazp python=3.11
+conda activate wazp
+conda install -c conda-forge cfitsio=3.430
+conda install -c cta-observatory sparse2d
+conda install -c conda-forge pip
+```
+
+Clone the repository:
+```bash
+git clone https://github.com/linea-it/wazp
+```
+
+Install WaZP with:
+```bash
+cd wazp/
+python setup.py install
+```
+
+or
+
+```bash
+pip install wazp/
+```
+
+or, for developers
+
+```bash
+pip install -e wazp/
+```
