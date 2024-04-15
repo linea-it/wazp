@@ -106,6 +106,3 @@ job_id4 = slurm_submit(
 )
 
 print ('results in ', workdir)
-
-
-
