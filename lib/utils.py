@@ -29,7 +29,7 @@ def create_slurm_script(task, config, dconfig, narray, script):
     f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
     if narray<=slurm_cfg['max_parallel']:
         f.write(f"#SBATCH --ntasks={narray}\n")
-    else
+    else:
         f.write(f"#SBATCH --ntasks={slurm_cfg['max_parallel']}\n")
     if narray > 1:
         f.write(
