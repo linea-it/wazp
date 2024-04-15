@@ -60,7 +60,7 @@ pmem_tile(
     param_cfg['pmem_cfg'], 
     data_cls, data_cls, clcat, 
     footprint, galcat, maglim, 
-    zp_metrics['sig_dz0'], param_cfg['cosmo_params'],
+    zp_metrics, param_cfg['cosmo_params'],
     magstar_file, out_paths, param_cfg['verbose']
 )
 
