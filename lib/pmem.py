@@ -577,20 +577,37 @@ def plot_pmems(my_cluster, data_gal, galcat_keys, pmem, r200, n200, out_paths):
     return
 
 
-def sigma_dz0(sig_dz0, z):
-    return (sig_dz0[0] + z*sig_dz0[1])
+def sigma_dz0(zp_metrics, z):
+    sig_dz0 = zp_metrics['sig_dz0']
+    zpsat = zp_metrics['zpsat']
+    sig0 = sig_dz0[0] +\
+        sig_dz0[1]*z +\
+        sig_dz0[2]*z**2 +\
+        sig_dz0[3]*z**3
+    if np.ndim(sig0) == 0:
+        if z>zpsat:
+            sig0 = sig_dz0[0] +\
+                sig_dz0[1]*zpsat +\
+                sig_dz0[2]*zpsat**2 +\
+                sig_dz0[3]*zpsat**3        
+    else:
+        sig0[z>zpsat] = sig_dz0[0] +\
+                sig_dz0[1]*zpsat +\
+                sig_dz0[2]*zpsat**2 +\
+                sig_dz0[3]*zpsat**3    
+    return sig0
 
 
 def filter_galcat(data_gal, galcat_keys, data_cluster, clcat_analysis_keys, 
-                  photoz_support, sig_dz0, mstar_filename, pmem_specs):
+                  photoz_support, zp_metrics, mstar_filename, pmem_specs):
     zclmax = max(data_cluster[clcat_analysis_keys['key_zp']])
-    sig_dz0max = sigma_dz0(sig_dz0, zclmax)
+    sig_dz0max = sigma_dz0(zp_metrics, zclmax)
     zpmax = zclmax +\
-            photoz_support['nsig'] * sigma_dz0(sig_dz0, zclmax) * (1.+zclmax)
+            photoz_support['nsig'] * sigma_dz0(zp_metrics, zclmax) * (1.+zclmax)
     mag = data_gal[galcat_keys['key_mag']]
     zp  = data_gal[galcat_keys['key_zp']]
-    zpm = (zp + photoz_support['nsig']*sigma_dz0(sig_dz0, zclmax)) /\
-          (1.-photoz_support['nsig']*sigma_dz0(sig_dz0, zclmax))
+    zpm = (zp + photoz_support['nsig']*sigma_dz0(zp_metrics, zclmax)) /\
+          (1.-photoz_support['nsig']*sigma_dz0(zp_metrics, zclmax))
     magmax = _mstar_ (mstar_filename, zpm) + pmem_specs['dmagmax']
     cond = ((zp <= zpm) & (mag<=magmax)) 
     return data_gal[cond] 
@@ -973,7 +990,7 @@ def mean_bkg(my_cluster, counts_bkg_mpc2, counts_bkg_arcmin2,
 
 
 def build_my_cluster (index_cl, data_cluster, clcat_analysis_keys, 
-                      photoz_support, sig_dz0, mag_bin_specs, pmem_specs, 
+                      photoz_support, zp_metrics, mag_bin_specs, pmem_specs, 
                       richness_specs, mstar_filename, cosmo_params):
     """
     """
@@ -992,9 +1009,9 @@ def build_my_cluster (index_cl, data_cluster, clcat_analysis_keys,
     mstar = _mstar_ (mstar_filename, zcl)
     imag_star = vec_bin_pos(mstar, mag_bin_specs)
 
-    zpmin = zcl - photoz_support['nsig']*sigma_dz0(sig_dz0, zcl)*(1.+zcl)
-    zpmax = zcl + photoz_support['nsig']*sigma_dz0(sig_dz0, zcl)*(1.+zcl)
-    sig_dz = sigma_dz0(sig_dz0, zcl)*(1.+zcl)
+    zpmin = zcl - photoz_support['nsig']*sigma_dz0(zp_metrics, zcl)*(1.+zcl)
+    zpmax = zcl + photoz_support['nsig']*sigma_dz0(zp_metrics, zcl)*(1.+zcl)
+    sig_dz = sigma_dz0(zp_metrics, zcl)*(1.+zcl)
     magmin = mstar - pmem_specs['dmagmin']
     magmax = mstar + pmem_specs['dmagmax']
 
@@ -2189,7 +2206,7 @@ def data_gal_tile_from_mosaic (galcat_mosaic_specs, galcat_keys,
 def pmem_tile(admin, tile_specs,
               pmem_cfg, data_cls_analysis, data_cls_all, clcat,
               footprint, galcat, maglim, 
-              sig_dz0, cosmo_params, mstar_filename, out_paths, verbose,
+              zp_metrics, cosmo_params, mstar_filename, out_paths, verbose,
               dat_galcat=None, dat_footprint=None): 
 
     workdir = out_paths['workdir']
@@ -2282,7 +2299,7 @@ def pmem_tile(admin, tile_specs,
         # build "my_cluster" dictionary that describes the useful cl ppties. 
         my_cluster = build_my_cluster (
             i, data_cluster,
-            clcat['keys'], pmem_cfg['photoz_support'], sig_dz0, 
+            clcat['keys'], pmem_cfg['photoz_support'], zp_metrics, 
             pmem_cfg['mag_bin_specs'], pmem_cfg['pmem_specs'], 
             pmem_cfg['richness_specs'], mstar_filename, cosmo_params
         )
@@ -2443,7 +2460,7 @@ def pmem_tile(admin, tile_specs,
 
 def pmem_list(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
               hpx_meta, galcat, 
-              sig_dz0, cosmo_params, mstar_filename, out_paths, verbose):
+              zp_metrics, cosmo_params, mstar_filename, out_paths, verbose):
 
     workdir = out_paths['workdir_loc'] 
 
@@ -2477,7 +2494,7 @@ def pmem_list(pmem_cfg, data_cls_analysis, data_cls_all, clcat_keys,
 
         # build "my_cluster" dictionary that describes the useful cl ppties. 
         my_cluster = build_my_cluster(
-            i, data_cluster, clcat_keys, pmem_cfg['photoz_support'], sig_dz0, 
+            i, data_cluster, clcat_keys, pmem_cfg['photoz_support'], zp_metrics, 
             pmem_cfg['mag_bin_specs'], pmem_cfg['pmem_specs'], 
             pmem_cfg['richness_specs'], mstar_filename, cosmo_params
         )
@@ -2872,7 +2889,7 @@ def run_pmem_list(data_cls, config, dconfig, thread_id):
             data_cls[data_cls['thread_id']==thread_id], 
             data_cls, clcat['keys'], 
             footprint, galcat, 
-            zp_metrics['sig_dz0'], param_cfg['cosmo_params'],
+            zp_metrics, param_cfg['cosmo_params'],
             magstar_file, out_paths, param_cfg['verbose']
         )
 
