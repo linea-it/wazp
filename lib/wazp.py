@@ -69,13 +69,33 @@ def create_tile_directories(root, path):
     return
 
 
+def sigma_dz0(zp_metrics, z):
+    sig_dz0 = zp_metrics['sig_dz0']
+    zpsat = zp_metrics['zpsat']
+    sig0 = sig_dz0[0] +\
+        sig_dz0[1]*z +\
+        sig_dz0[2]*z**2 +\
+        sig_dz0[3]*z**3
+    if np.ndim(sig0) == 0:
+        if z>zpsat:
+            sig0 = sig_dz0[0] +\
+                sig_dz0[1]*zpsat +\
+                sig_dz0[2]*zpsat**2 +\
+                sig_dz0[3]*zpsat**3        
+    else:
+        sig0[z>zpsat] = sig_dz0[0] +\
+                sig_dz0[1]*zpsat +\
+                sig_dz0[2]*zpsat**2 +\
+                sig_dz0[3]*zpsat**3    
+    return sig0
+
+
 def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir): 
 
     output = os.path.join(
         workdir, wazp_cfg['zpslices_filename']
     )
 
-    sig0 = np.float64(zp_metrics['sig_dz0'])
     zpmin, zpmax = np.float64(zp_metrics['zpmin']), \
                    np.float64(zp_metrics['zpmax'])
     nsamp_slice = np.float64(wazp_cfg['nsamp_slice'])
@@ -83,7 +103,7 @@ def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir):
 
     zsl=zpmin
     for i in range(0,100):
-        sig = (sig0[0] + zsl*sig0[1])*(1+zsl)
+        sig = sigma_dz0(zp_metrics, zsl)*(1+zsl)
         zsl = zsl + sig/nsamp_slice
         if zsl > zpmax:
             break
@@ -93,7 +113,7 @@ def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir):
     zsl[0] = zpmin
 
     for i in range(0,imax):
-        sig = (sig0[0] + zsl[i]*sig0[1])*(1+zsl[i])
+        sig = sigma_dz0(zp_metrics, zsl[i])*(1+zsl[i])
         im1 = i
         i+=1
         zsl[i] = zsl[im1] + sig/nsamp_slice
@@ -104,9 +124,9 @@ def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir):
         imax = min(len(zsl)-1, iref+4)
         zsl = zsl[imin:imax]
 
-    zsl_min = zsl - nsig*(sig0[0] + zsl*sig0[1])*(1.+zsl) 
-    zsl_max = zsl + nsig*(sig0[0] + zsl*sig0[1])*(1.+zsl) 
-    sig_dz = (sig0[0] + zsl*sig0[1]) * (1.+zsl)
+    zsl_min = zsl - nsig*sigma_dz0(zp_metrics, zsl) * (1.+zsl) 
+    zsl_max = zsl + nsig*sigma_dz0(zp_metrics, zsl) * (1.+zsl) 
+    sig_dz = sigma_dz0(zp_metrics, zsl) * (1.+zsl)
     nsl = len(zsl)
 
     zsl_min[zsl_min<=0.001] = 0.001
