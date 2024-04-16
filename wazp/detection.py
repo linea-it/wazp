@@ -47,7 +47,7 @@ def create_wazp_directories(workdir):
 
     create_directory(workdir)
     create_directory(os.path.join(workdir, 'tiles'))
-    create_directory(os.path.join(workdir, 'sky_partition_wazp'))
+    create_directory(os.path.join(workdir, 'sky_partition_detection'))
     create_directory(os.path.join(workdir, 'sky_partition_pmem'))
     create_directory(os.path.join(workdir, 'gbkg'))
     create_directory(os.path.join(workdir, 'calib'))
@@ -90,16 +90,16 @@ def sigma_dz0(zp_metrics, z):
     return sig0
 
 
-def compute_zpslices(zp_metrics, wazp_cfg, zs_targ, workdir): 
+def compute_zpslices(zp_metrics, detection_cfg, zs_targ, workdir): 
 
     output = os.path.join(
-        workdir, wazp_cfg['zpslices_filename']
+        workdir, detection_cfg['zpslices_filename']
     )
 
     zpmin, zpmax = np.float64(zp_metrics['zpmin']), \
                    np.float64(zp_metrics['zpmax'])
-    nsamp_slice = np.float64(wazp_cfg['nsamp_slice'])
-    nsig = np.float64(wazp_cfg['nsig_dz'])
+    nsamp_slice = np.float64(detection_cfg['nsamp_slice'])
+    nsig = np.float64(detection_cfg['nsig_dz'])
 
     zsl=zpmin
     for i in range(0,100):
@@ -193,12 +193,12 @@ def bkg_from_hpx_counts (dat_footprint, footprint, ra, dec, weights):
 
 
 def bkg_tile_slice (dat_galcat, dat_footprint, galcat, footprint, 
-                    zpslices, mstar_file, wazp_cfg, cosmo_params, 
+                    zpslices, mstar_file, detection_cfg, cosmo_params, 
                     dmag_faint, weight_mode):
 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
     ra, dec, weight = select_galaxies_in_slice(
-        dat_galcat, galcat, wazp_cfg, 
+        dat_galcat, galcat, detection_cfg, 
         zpslices, mstar_file, dmag_faint, weight_mode
     )
     conv_factor = cosmo.angular_diameter_distance(zpslices['zsl'])
@@ -211,7 +211,7 @@ def bkg_tile_slice (dat_galcat, dat_footprint, galcat, footprint,
 
 
 def bkg_tile (dat_galcat, dat_footprint, galcat, footprint, 
-              zpslices, mstar_file, wazp_cfg, cosmo_params, 
+              zpslices, mstar_file, detection_cfg, cosmo_params, 
               dmag_faint, weight_mode):
 
     nsl = len(zpslices)
@@ -220,7 +220,7 @@ def bkg_tile (dat_galcat, dat_footprint, galcat, footprint,
     for iz in range (0, nsl):
         bkg_arcmin2[iz], bkg_mpc2[iz] = bkg_tile_slice (
             dat_galcat, dat_footprint, galcat, footprint, 
-            zpslices[iz], mstar_file, wazp_cfg, cosmo_params, 
+            zpslices[iz], mstar_file, detection_cfg, cosmo_params, 
             dmag_faint, weight_mode
         )
 
@@ -243,13 +243,13 @@ def bkg_tile (dat_galcat, dat_footprint, galcat, footprint,
     return data_bkg
 
 
-def create_wcs_at_z(wazp_cfg, tile_specs, z, cosmo_params):
+def create_wcs_at_z(detection_cfg, tile_specs, z, cosmo_params):
 
     cosmo = flat(
         H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0']
     )
     racen, deccen = tile_specs['ra'], tile_specs['dec']
-    pix_mpc = 1./float(wazp_cfg['resolution'])
+    pix_mpc = 1./float(detection_cfg['resolution'])
     conv_factor = cosmo.angular_diameter_distance(z)
     pix_deg = np.degrees( pix_mpc / conv_factor.value)
 
@@ -265,7 +265,7 @@ def create_wcs_at_z(wazp_cfg, tile_specs, z, cosmo_params):
     return w, nxy
 
 
-def vmap_from_hpx (dat_hpx, footprint, tile_specs, wazp_cfg, 
+def vmap_from_hpx (dat_hpx, footprint, tile_specs, detection_cfg, 
                    cosmo_params, zsl):
 
     Nside, nest = footprint['Nside'], footprint['nest']
@@ -273,7 +273,7 @@ def vmap_from_hpx (dat_hpx, footprint, tile_specs, wazp_cfg,
 
     # build vmap image header
     wvmap, nxy = create_wcs_at_z(
-        wazp_cfg, tile_specs, zsl, cosmo_params
+        detection_cfg, tile_specs, zsl, cosmo_params
     )
     vmap = np.zeros((nxy,nxy))
 
@@ -290,9 +290,9 @@ def vmap_from_hpx (dat_hpx, footprint, tile_specs, wazp_cfg,
     vmap[xvr0[np.isin(hpx_map, hpx)], yvr0[np.isin(hpx_map, hpx)]] = 1.
     return vmap
 
-def map2fits(imap, wazp_cfg, tile, zsl, cosmo_params, fitsname):
+def map2fits(imap, detection_cfg, tile, zsl, cosmo_params, fitsname):
 
-    w, nxy = create_wcs_at_z(wazp_cfg, tile, zsl, cosmo_params)
+    w, nxy = create_wcs_at_z(detection_cfg, tile, zsl, cosmo_params)
     # write xycat_fi to a file for mr_filter
     header = w.to_header()
     hdu = fits.PrimaryHDU(header=header)
@@ -301,21 +301,21 @@ def map2fits(imap, wazp_cfg, tile, zsl, cosmo_params, fitsname):
     return
 
 
-def map_detlum_weight(mag, mstar, wazp_cfg):
+def map_detlum_weight(mag, mstar, detection_cfg):
 
     weight = np.ones(len(mag))
-    if wazp_cfg['map_lum_weight_mode'] == True:
+    if detection_cfg['map_lum_weight_mode'] == True:
         weight = detlum_weight(
-            mag, mstar, wazp_cfg['lum_weight_map_power']
+            mag, mstar, detection_cfg['lum_weight_map_power']
         )
     return weight
 
-def map_lum_weight(mag, mstar, wazp_cfg):
+def map_lum_weight(mag, mstar, detection_cfg):
 
     weight = np.ones(len(mag))
-    if wazp_cfg['map_lum_weight_mode'] == True:
+    if detection_cfg['map_lum_weight_mode'] == True:
         weight = lum_weight(
-            mag, mstar, wazp_cfg['lum_weight_map_power']
+            mag, mstar, detection_cfg['lum_weight_map_power']
         )
     return weight
 
@@ -331,7 +331,7 @@ def pixelized_radec(ra_map, dec_map, weight_map, w, nxy):
     return xycat
 
 
-def select_galaxies_in_slice(dat_galcat, galcat, wazp_cfg, zpslices, 
+def select_galaxies_in_slice(dat_galcat, galcat, detection_cfg, zpslices, 
                              mstar_file, dmag_faint, weight_mode):
     ra, dec = dat_galcat[galcat['keys']['key_ra']],\
               dat_galcat[galcat['keys']['key_dec']]
@@ -342,8 +342,8 @@ def select_galaxies_in_slice(dat_galcat, galcat, wazp_cfg, zpslices,
     mstar = _mstar_(mstar_file,  zpslices['zsl'])
 
 
-    #dmag_det =    wazp_cfg['dmag_det']
-    dmag_bright = wazp_cfg['dmag_bright']
+    #dmag_det =    detection_cfg['dmag_det']
+    dmag_bright = detection_cfg['dmag_bright']
     mag_min, mag_max_det = mstar - dmag_bright, mstar + dmag_faint
 
     cond_for_wmap = ((zp<np.float64(zsl_max)) & 
@@ -356,14 +356,14 @@ def select_galaxies_in_slice(dat_galcat, galcat, wazp_cfg, zpslices,
     if weight_mode == "none":
         weight_map = np.ones(len(mag_map))
     if weight_mode == "detlum":
-        weight_map = map_detlum_weight(mag_map, mstar, wazp_cfg)
+        weight_map = map_detlum_weight(mag_map, mstar, detection_cfg)
     if weight_mode == "lum":
-        weight_map = map_lum_weight(mag_map, mstar, wazp_cfg)
+        weight_map = map_lum_weight(mag_map, mstar, detection_cfg)
     if weight_mode == "zplum":
         weight_map = zp_weight(
             zpslices['zsl'], 
             zsl_min, zsl_max, zp_map
-        ) * map_lum_weight(mag_map, mstar, wazp_cfg)
+        ) * map_lum_weight(mag_map, mstar, detection_cfg)
     if weight_mode == "zp":
         weight_map = zp_weight(zpslices['zsl'], zsl_min, zsl_max, zp_map)
 
@@ -446,7 +446,7 @@ def counts_in_cells(ra, dec, Nside, data_fp, footprint, ncmax):
 
 
 def bkg_global_survey(galcat, footprint, 
-                      tiling, cosmo_params, mstar_file, wazp_cfg, workdir):
+                      tiling, cosmo_params, mstar_file, detection_cfg, workdir):
 
     # relevant paths and files 
     tiles_filename = os.path.join(
@@ -454,7 +454,7 @@ def bkg_global_survey(galcat, footprint,
         tiling['tiles_filename']
     )
     zpslices_filename = os.path.join(
-        workdir, wazp_cfg['zpslices_filename']
+        workdir, detection_cfg['zpslices_filename']
     )
     tiles_core_npy = os.path.join(
         workdir, tiling['rpath'],
@@ -462,7 +462,7 @@ def bkg_global_survey(galcat, footprint,
     )
     gbkg_filename = os.path.join(
         workdir, 'gbkg', 
-        wazp_cfg['gbkg_filename']
+        detection_cfg['gbkg_filename']
     )
 
     if os.path.isfile(gbkg_filename):
@@ -478,7 +478,7 @@ def bkg_global_survey(galcat, footprint,
         allow_pickle=True
     )
 
-    area_min = wazp_cfg['gbkg_area']
+    area_min = detection_cfg['gbkg_area']
     # select galcat and associated footprint to reach some
     # minimum area in the survey 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
@@ -502,18 +502,18 @@ def bkg_global_survey(galcat, footprint,
 
     bkg_global(data_gal, galcat, data_fp, footprint, 
                zpslices_filename, cosmo_params, 
-               mstar_file, wazp_cfg, gbkg_filename)
+               mstar_file, detection_cfg, gbkg_filename)
     return
 
 
 def bkg_global(data_gal, galcat, data_fp, footprint, 
                zpslices_filename, cosmo_params, 
-               mstar_file, wazp_cfg, output):
+               mstar_file, detection_cfg, output):
 
 
-    ncmax = wazp_cfg['ncmax']
+    ncmax = detection_cfg['ncmax']
     beta_default = -0.8
-    radius_snr_mpc = wazp_cfg['radius_snr_mpc']
+    radius_snr_mpc = detection_cfg['radius_snr_mpc']
     # select galcat and associated footprint to reach 
     # some minimum area in the survey 
     cosmo = flat(H0=cosmo_params['H'], Om0=cosmo_params['omega_M_0'])
@@ -548,12 +548,12 @@ def bkg_global(data_gal, galcat, data_fp, footprint,
         # stats - for wazp_snr
         # weight modes should be same as in add_peaks_attributes 
         ra, dec, Nweight = select_galaxies_in_slice(
-            data_gal, galcat, wazp_cfg, zpslices[i], 
-            mstar_file, wazp_cfg['dmag_rich'], 'none'
+            data_gal, galcat, detection_cfg, zpslices[i], 
+            mstar_file, detection_cfg['dmag_rich'], 'none'
         )
         ra, dec, Lweight = select_galaxies_in_slice(
-            data_gal, galcat, wazp_cfg, zpslices[i], 
-            mstar_file, wazp_cfg['dmag_rich'], 'lum'
+            data_gal, galcat, detection_cfg, zpslices[i], 
+            mstar_file, detection_cfg['dmag_rich'], 'lum'
         )
         #   mean number of galaxies / cell weighted by lum or not
         lbar0_rich[i] = cell_area[i] * np.sum(Lweight)/area_eff
@@ -562,12 +562,12 @@ def bkg_global(data_gal, galcat, data_fp, footprint,
         # stats - for wazp_richness
         # weight modes should be same as in add_peaks_attributes 
         ra, dec, Nweight = select_galaxies_in_slice(
-            data_gal, galcat, wazp_cfg, zpslices[i], 
-            mstar_file, wazp_cfg['dmag_det'], 'zp'
+            data_gal, galcat, detection_cfg, zpslices[i], 
+            mstar_file, detection_cfg['dmag_det'], 'zp'
         )
         ra, dec, Lweight = select_galaxies_in_slice(
-            data_gal, galcat, wazp_cfg, zpslices[i], 
-            mstar_file, wazp_cfg['dmag_det'], 'zplum'
+            data_gal, galcat, detection_cfg, zpslices[i], 
+            mstar_file, detection_cfg['dmag_det'], 'zplum'
         )
         lbar0_snr[i] = cell_area[i] *  np.sum(Lweight)/area_eff
         nbar0_snr[i] = cell_area[i] * np.sum(Nweight)/area_eff
@@ -577,16 +577,16 @@ def bkg_global(data_gal, galcat, data_fp, footprint,
         # used to compute SNR @ dmag_det
         # select galaxies in slice with dmag_rich and no lum weight
         ra, dec, weight = select_galaxies_in_slice(
-            data_gal, galcat, wazp_cfg, zpslices[i], 
-            mstar_file, wazp_cfg['dmag_det'], 'none'
+            data_gal, galcat, detection_cfg, zpslices[i], 
+            mstar_file, detection_cfg['dmag_det'], 'none'
         )
 
         #stats Counts in Cells 
         nbar_inf, ksi2_inf = counts_in_cells(
-            ra, dec, 2**jinf[i], data_fp, footprint, wazp_cfg['ncmax']
+            ra, dec, 2**jinf[i], data_fp, footprint, detection_cfg['ncmax']
         )
         nbar_sup, ksi2_sup = counts_in_cells(
-            ra, dec, 2**jsup[i], data_fp, footprint, wazp_cfg['ncmax']
+            ra, dec, 2**jsup[i], data_fp, footprint, detection_cfg['ncmax']
         )
 
         #interpolate at nominal aperture area
@@ -624,9 +624,9 @@ def bkg_global(data_gal, galcat, data_fp, footprint,
     return read_FitsCat(output) 
 
 
-def compute_catimage(ra_map, dec_map, weight_map, zpslices, wazp_cfg, tile_specs, 
+def compute_catimage(ra_map, dec_map, weight_map, zpslices, detection_cfg, tile_specs, 
                      cosmo_params):
-    w, nxy = create_wcs_at_z(wazp_cfg, tile_specs, zpslices['zsl'], cosmo_params)
+    w, nxy = create_wcs_at_z(detection_cfg, tile_specs, zpslices['zsl'], cosmo_params)
     xycat = pixelized_radec (ra_map, dec_map, weight_map, w, nxy)
     return xycat
 
@@ -653,7 +653,7 @@ def randoms_in_spherical_cap(tile, bkg_arcmin2):
     return hp.pix2ang(Nside_samp, pix_samp, False, lonlat=True)
 
 
-def compute_filled_catimage(ra_map, dec_map, weight_map, zpslices, wazp_cfg, tile, 
+def compute_filled_catimage(ra_map, dec_map, weight_map, zpslices, detection_cfg, tile, 
                             cosmo_params, data_footprint, footprint, bkg_arcmin2):
 
     # find edge pixels of the footprint 
@@ -717,17 +717,17 @@ def compute_filled_catimage(ra_map, dec_map, weight_map, zpslices, wazp_cfg, til
     weight_all = np.hstack((np.ones(len(ra_ranf1)), weight_map))
 
     # build catalogue image 
-    w, nxy = create_wcs_at_z(wazp_cfg, tile, zpslices['zsl'], cosmo_params)
+    w, nxy = create_wcs_at_z(detection_cfg, tile, zpslices['zsl'], cosmo_params)
     xycat = pixelized_radec (ra_all, dec_all, weight_all, w, nxy)
     
     return xycat
 
 
-def run_mr_filter(filled_catimage, wmap, wazp_cfg):
+def run_mr_filter(filled_catimage, wmap, detection_cfg):
     
     # run mr_filter to build wavelet map
-    scale_min_pix = wazp_cfg['scale_min_mpc'] * float(wazp_cfg['resolution'])
-    scale_max_pix = wazp_cfg['scale_max_mpc'] * float(wazp_cfg['resolution'])
+    scale_min_pix = detection_cfg['scale_min_mpc'] * float(detection_cfg['resolution'])
+    scale_max_pix = detection_cfg['scale_max_mpc'] * float(detection_cfg['resolution'])
     smin = int(round(math.log10(scale_min_pix)/math.log10(2.)))
     smax = int(round(math.log10(scale_max_pix)/math.log10(2.)))
 
@@ -891,12 +891,12 @@ def compute_flux_aper(rap, decp, hpix, weight, aper, Nside, nest):
     return Nraw*area_ann_deg2(0., aper)/pixelized_area
 
 
-def compute_flux_aper_vec(rap, decp, aper, dat_galcat, galcat, wazp_cfg, 
+def compute_flux_aper_vec(rap, decp, aper, dat_galcat, galcat, detection_cfg, 
                           zpslices, mstar_file, dmag_faint, weight_mode):
 
     ra, dec, weight = select_galaxies_in_slice(
         dat_galcat, galcat, 
-        wazp_cfg, zpslices, mstar_file, dmag_faint, weight_mode
+        detection_cfg, zpslices, mstar_file, dmag_faint, weight_mode
     )
 
     Nside = 16384
@@ -913,7 +913,7 @@ def compute_flux_aper_vec(rap, decp, aper, dat_galcat, galcat, wazp_cfg,
 
 def add_peaks_attributes(data_peaks, dat_galcat, galcat, 
                          dat_footprint, footprint, 
-                         wazp_cfg, zpslices, gbkg, 
+                         detection_cfg, zpslices, gbkg, 
                          mstar_file, aper_deg, cosmo_params):
 
     Nbkg_rich, Lbkg_rich = gbkg['nbar_rich'], gbkg['lbar_rich']
@@ -924,23 +924,23 @@ def add_peaks_attributes(data_peaks, dat_galcat, galcat,
     area = 3600.*area_ann_deg2(0., aper_deg) # arcmin2
     Nraw_rich = compute_flux_aper_vec(
         data_peaks['ra'], data_peaks['dec'], aper_deg, 
-        dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
-        wazp_cfg['dmag_rich'], 'none'
+        dat_galcat, galcat, detection_cfg, zpslices, mstar_file, 
+        detection_cfg['dmag_rich'], 'none'
     )
     Lraw_rich = compute_flux_aper_vec(
         data_peaks['ra'], data_peaks['dec'], aper_deg, 
-        dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
-        wazp_cfg['dmag_rich'], 'lum'
+        dat_galcat, galcat, detection_cfg, zpslices, mstar_file, 
+        detection_cfg['dmag_rich'], 'lum'
     )
     Nraw_snr = compute_flux_aper_vec(
         data_peaks['ra'], data_peaks['dec'], aper_deg, 
-        dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
-        wazp_cfg['dmag_det'], 'zp'
+        dat_galcat, galcat, detection_cfg, zpslices, mstar_file, 
+        detection_cfg['dmag_det'], 'zp'
     )
     Lraw_snr = compute_flux_aper_vec(
         data_peaks['ra'], data_peaks['dec'], aper_deg, 
-        dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
-        wazp_cfg['dmag_det'], 'zplum'
+        dat_galcat, galcat, detection_cfg, zpslices, mstar_file, 
+        detection_cfg['dmag_det'], 'zplum'
     )
 
     snr_n = np.maximum((Nraw_snr - Nbkg_snr) / sig_N, np.zeros(len(Nraw_snr)))
@@ -1306,7 +1306,7 @@ def plot_zhist_in_cylinder(dcyl, zin, wazp_specs, zpslices_specs, tile_specs,
     plt.savefig(
         os.path.join(
             out_paths['workdir_loc'], 
-            out_paths['wazp']['plots'],
+            out_paths['detection']['plots'],
             'zhist_cyln'+str(id_cyl)+'.png'
         ),
         dpi=200
@@ -1393,7 +1393,7 @@ def plot2(dcyl, zin, wazp_specs, zpslices_specs, tile_specs, mstar_file,
     plt.savefig(
         os.path.join(
             out_paths['workdir_loc'], 
-            out_paths['wazp']['plots'],
+            out_paths['detection']['plots'],
             'zhist_cylc'+str(id_cyl)+'.png'
         ),
         dpi=200
@@ -1717,19 +1717,19 @@ def append_infos_to_clusters(target, data_clusters_init, cosmo_params):
     return data_clusters
 
 
-def wave_radius(wmap_data, ip, jp, wazp_cfg):
+def wave_radius(wmap_data, ip, jp, detection_cfg):
 
     dwmap = ndi.distance_transform_edt(
-        (wmap_data>wazp_cfg['wmap_thresh']
+        (wmap_data>detection_cfg['wmap_thresh']
         )*wmap_data
     )
-    radius_mpc = dwmap[ip, jp]/float(wazp_cfg['resolution'])
+    radius_mpc = dwmap[ip, jp]/float(detection_cfg['resolution'])
     return radius_mpc
 
 
 def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint, 
                     galcat, footprint,
-                    zpslices, gbkg, mstar_file, wazp_cfg, 
+                    zpslices, gbkg, mstar_file, detection_cfg, 
                     cosmo_params, paths, verbose):
     
     isl = zpslices['id']                                 
@@ -1738,41 +1738,41 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
     )
     conv_factor = cosmo.angular_diameter_distance(zpslices['zsl']) 
     xycat_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
+        paths['workdir_loc'], paths['detection']['files'], 
         'xycat_'+str(isl)+'.fits'
     )
     xycat_fi_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
+        paths['workdir_loc'], paths['detection']['files'], 
         'xycat_fi_'+str(isl)+'.fits'
     )
     wmap_fitsname =  os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
+        paths['workdir_loc'], paths['detection']['files'], 
         'wmap_'+str(isl)+'.fits'
     )
     peaks_fitsname = os.path.join(
-        paths['workdir_loc'], paths['wazp']['files'], 
+        paths['workdir_loc'], paths['detection']['files'], 
         "peaks_"+str(isl)+".fits"
     )
 
     # select objects for computing density maps 
     ra_map, dec_map, weight_map = select_galaxies_in_slice(
-        dat_galcat, galcat, wazp_cfg, zpslices, mstar_file, 
-        wazp_cfg['dmag_det'], 'detlum'
+        dat_galcat, galcat, detection_cfg, zpslices, mstar_file, 
+        detection_cfg['dmag_det'], 'detlum'
     )
     xycat = compute_catimage(
         ra_map, dec_map, weight_map, 
-        zpslices, wazp_cfg, tile, cosmo_params
+        zpslices, detection_cfg, tile, cosmo_params
     ) 
     # compute bkg without weights for filling image holes => mr_filter
-    if wazp_cfg['map_filling']:
+    if detection_cfg['map_filling']:
         bkg_arcmin2, bkg_mpc2 = bkg_tile_slice(
             dat_galcat, dat_footprint, galcat, footprint, 
-            zpslices, mstar_file, wazp_cfg, cosmo_params, 
-            wazp_cfg['dmag_det'], 'none'
+            zpslices, mstar_file, detection_cfg, cosmo_params, 
+            detection_cfg['dmag_det'], 'none'
         )
         xycat_fi = compute_filled_catimage(
             ra_map, dec_map, weight_map, 
-            zpslices, wazp_cfg, tile, cosmo_params, 
+            zpslices, detection_cfg, tile, cosmo_params, 
             dat_footprint, footprint, bkg_arcmin2
         )
     else:
@@ -1781,28 +1781,28 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
     # build density map /  extract peaks /compute attributes and filter 
     if not os.path.isfile(wmap_fitsname):
         map2fits(
-            xycat_fi, wazp_cfg, 
+            xycat_fi, detection_cfg, 
             tile, zpslices['zsl'], 
             cosmo_params, xycat_fi_fitsname
         )
-        run_mr_filter(xycat_fi_fitsname, wmap_fitsname, wazp_cfg)
+        run_mr_filter(xycat_fi_fitsname, wmap_fitsname, detection_cfg)
     wmap_data = fits2map(wmap_fitsname)
     rap0, decp0, ip0, jp0 = wmap2peaks(
-        wmap_fitsname, wazp_cfg, tile, zpslices['zsl'], cosmo_params
+        wmap_fitsname, detection_cfg, tile, zpslices['zsl'], cosmo_params
     )
     rap, decp, ip, jp = filter_peaks(
-        admin, tile, zpslices['zsl'], cosmo_params, wazp_cfg['resolution'], 
+        admin, tile, zpslices['zsl'], cosmo_params, detection_cfg['resolution'], 
         rap0, decp0, ip0, jp0
     ) # to keep inner tile peaks
     wradius_mpc = wave_radius(
-        wmap_data, ip.astype(int), jp.astype(int), wazp_cfg
+        wmap_data, ip.astype(int), jp.astype(int), detection_cfg
     )
     coverfrac = coverfrac_disc(
         rap, decp, 
         dat_footprint, footprint, 
-        np.degrees( wazp_cfg['radius_snr_mpc'] / conv_factor.value)
+        np.degrees( detection_cfg['radius_snr_mpc'] / conv_factor.value)
     )
-    pcond = ((coverfrac>0.) & (wradius_mpc>wazp_cfg['radius_snr_mpc']))
+    pcond = ((coverfrac>0.) & (wradius_mpc>detection_cfg['radius_snr_mpc']))
     data_peaks = init_peaks_table(
         rap[pcond], decp[pcond], ip[pcond], jp[pcond], 
         coverfrac[pcond], wradius_mpc[pcond], zpslices['zsl']
@@ -1812,9 +1812,9 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
     add_peaks_attributes(
         data_peaks, dat_galcat, galcat, 
         dat_footprint, footprint, 
-        wazp_cfg, zpslices, gbkg, 
+        detection_cfg, zpslices, gbkg, 
         mstar_file, 
-        np.degrees( wazp_cfg['radius_snr_mpc'] / conv_factor.value), 
+        np.degrees( detection_cfg['radius_snr_mpc'] / conv_factor.value), 
         cosmo_params
     )
 
@@ -1826,7 +1826,7 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
         print ('..............peaks filtering SNR        in / out ', 
                len(data_peaks), 
                len(data_peaks[data_peaks['snr']>=\
-                              np.float64(wazp_cfg['snr_min'])]))
+                              np.float64(detection_cfg['snr_min'])]))
 
         eff_area_mpc2 = tile['eff_area_deg2'] * \
                         (np.pi * conv_factor.value / 180.)**2
@@ -1842,24 +1842,24 @@ def wazp_tile_slice(admin, tile, dat_galcat, dat_footprint,
         print ('         clusters density/mpc2 ', 
                np.round(
                    float(len(data_peaks[
-                       data_peaks['snr']>=wazp_cfg['snr_min']
+                       data_peaks['snr']>=detection_cfg['snr_min']
                    ]))/eff_area_mpc2, 3))
 
     if verbose >=2:
         map2fits(
             xycat, 
-            wazp_cfg, tile, zpslices['zsl'], cosmo_params, xycat_fitsname
+            detection_cfg, tile, zpslices['zsl'], cosmo_params, xycat_fitsname
         )
-        t = Table (data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']])
+        t = Table (data_peaks[data_peaks['snr']>=detection_cfg['snr_min']])
         t.write(peaks_fitsname,overwrite=True)
 
-    return data_peaks[data_peaks['snr']>=wazp_cfg['snr_min']]
+    return data_peaks[data_peaks['snr']>=detection_cfg['snr_min']]
 
 
 def wazp_tile(admin, tile_specs, 
               galcat, footprint, 
               mstar_file, maglim, 
-              wazp_cfg, clcat, cosmo_params, out_paths, verbose,
+              detection_cfg, clcat, cosmo_params, out_paths, verbose,
               dat_galcat=None, dat_footprint=None):  
 
 
@@ -1874,20 +1874,20 @@ def wazp_tile(admin, tile_specs,
         print ('..... Tile ', int(tile_specs['id']))
 
     if os.path.isfile(os.path.join(
-            tile_dir, out_paths['wazp']['results'], "clusters.fits"
+            tile_dir, out_paths['detection']['results'], "clusters.fits"
     )):
         return
 
     if not admin['target_mode']:
         create_directory(tile_dir)
-        create_tile_directories(tile_dir, out_paths['wazp'])
+        create_tile_directories(tile_dir, out_paths['detection'])
 
     out_paths['workdir_loc'] = tile_dir # local update 
     if dat_galcat is None:
         data_gal_tile, data_fp_tile = make_tile_cat(
             tile_specs,
             galcat, footprint,
-            maglim, wazp_cfg
+            maglim, detection_cfg
         )        
         if verbose >=2:
             t = Table (data_gal_tile)
@@ -1899,26 +1899,26 @@ def wazp_tile(admin, tile_specs,
         
     zpslices = read_FitsCat(
         os.path.join(
-            workdir, wazp_cfg['zpslices_filename']
+            workdir, detection_cfg['zpslices_filename']
         )
     )
     gbkg = read_FitsCat(
         os.path.join(
-            workdir, 'gbkg', wazp_cfg['gbkg_filename']
+            workdir, 'gbkg', detection_cfg['gbkg_filename']
         )
     )
 
     # compute mean bkg tile 
     #print ('..........Compute mean bkg in tile')
     #data_bkg = bkg_tile (data_gal_tile, data_fp_tile, galcat, footprint, 
-    #       zpslices, mstar_file, wazp_cfg, cosmo_params, 
-    #       wazp_cfg['dmag_det'], 'lum')
+    #       zpslices, mstar_file, detection_cfg, cosmo_params, 
+    #       detection_cfg['dmag_det'], 'lum')
 
     print ('..........Start wazp tile catalog construction')
     Nclusters = 0
     if not os.path.isfile(
             os.path.join(
-                out_paths['workdir_loc'], out_paths['wazp']['results'], 
+                out_paths['workdir_loc'], out_paths['detection']['results'], 
                 'clusters0.npy'
             )
     ):
@@ -1927,7 +1927,7 @@ def wazp_tile(admin, tile_specs,
         for isl in range (0, len(zpslices)):
             if not os.path.isfile(
                     os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                        out_paths['workdir_loc'], out_paths['detection']['files'], 
                         'peaks_'+str(isl)+'.npy'
                     )
             ):
@@ -1936,12 +1936,12 @@ def wazp_tile(admin, tile_specs,
                     admin, 
                     tile_specs, data_gal_tile, data_fp_tile, 
                     galcat, footprint,
-                    zpslices[isl], gbkg[isl], mstar_file, wazp_cfg, 
+                    zpslices[isl], gbkg[isl], mstar_file, detection_cfg, 
                     cosmo_params, out_paths, verbose
                 )
                 np.save(
                     os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                        out_paths['workdir_loc'], out_paths['detection']['files'], 
                         'peaks_'+str(isl)+'.npy'
                     ), data_peaks
                 )
@@ -1950,7 +1950,7 @@ def wazp_tile(admin, tile_specs,
                 print ('.............. Use existing detections in slice ', isl)
                 data_peaks = np.load(
                     os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['files'], 
+                        out_paths['workdir_loc'], out_paths['detection']['files'], 
                         'peaks_'+str(isl)+'.npy'
                     )
                 )
@@ -1960,32 +1960,32 @@ def wazp_tile(admin, tile_specs,
         if npeaks_tot>0:
             print ('..........Start cylinders')
             data_cylinders = make_cylinders(
-                peaks_list, zpslices, wazp_cfg, cosmo_params
+                peaks_list, zpslices, detection_cfg, cosmo_params
             )
             if verbose >=1:
                 t = Table (data_cylinders)
                 t.write(os.path.join(
-                    out_paths['workdir_loc'], out_paths['wazp']['results'], 
+                    out_paths['workdir_loc'], out_paths['detection']['results'], 
                     "cylinders.fits"),overwrite=True
                 )
 
             if data_cylinders is not None:    
                 print ('..........Start cylinders_2_clusters')
                 data_clusters0 = cylinders2clusters(
-                    zpslices, wazp_cfg, tile_specs, clcat, data_cylinders, 
+                    zpslices, detection_cfg, tile_specs, clcat, data_cylinders, 
                     mstar_file, cosmo_params, 
                     data_gal_tile, galcat, out_paths, footprint, verbose
                 )
                 np.save(os.path.join(
                     out_paths['workdir_loc'],
-                    out_paths['wazp']['results'], 
+                    out_paths['detection']['results'], 
                     'clusters0.npy'
                 ), data_clusters0)
                 
                 if verbose >=1:
                     t = Table (data_clusters0)
                     t.write(os.path.join(
-                        out_paths['workdir_loc'], out_paths['wazp']['results'], 
+                        out_paths['workdir_loc'], out_paths['detection']['results'], 
                         "clusters0.fits"
                     ), overwrite=True)
         
@@ -1996,14 +1996,14 @@ def wazp_tile(admin, tile_specs,
         print ('..........Use existing clusters')
         data_clusters0 = np.load(
             os.path.join(out_paths['workdir_loc'],
-                out_paths['wazp']['results'], 
+                out_paths['detection']['results'], 
                 'clusters0.npy')
         )
         
     print ('..........Start filtering ')
     if data_clusters0 is not None:
         data_clusters = cl_duplicates_filtering(
-            data_clusters0, wazp_cfg, clcat,
+            data_clusters0, detection_cfg, clcat,
             zpslices, cosmo_params, 'tile'
         )
         Nclusters = len(data_clusters)
@@ -2027,7 +2027,7 @@ def wazp_tile(admin, tile_specs,
     tile_info['Nclusters'] = Nclusters
     tile_info = Table(tile_info)
     tile_info.write(os.path.join(
-        out_paths['workdir_loc'], out_paths['wazp']['results'], 
+        out_paths['workdir_loc'], out_paths['detection']['results'], 
         "tile_info.fits"
     ), overwrite=True)
 
@@ -2035,7 +2035,7 @@ def wazp_tile(admin, tile_specs,
         t = Table (data_clusters)
         t.write(
             os.path.join(
-                tile_dir, out_paths['wazp']['results'], 
+                tile_dir, out_paths['detection']['results'], 
                 "clusters.fits"
             ),overwrite=True
         )
@@ -2050,13 +2050,13 @@ def tiles_with_clusters(out_paths, all_tiles):
         )
         if os.path.isfile(
                 os.path.join(
-                    tile_dir, out_paths['wazp']['results'], 
+                    tile_dir, out_paths['detection']['results'], 
                     "tile_info.fits"
                 )
         ):
             if read_FitsCat(
                     os.path.join(
-                        tile_dir, out_paths['wazp']['results'], 
+                        tile_dir, out_paths['detection']['results'], 
                         "tile_info.fits"
                     )
             )[0]['Nclusters'] > 0:
@@ -2230,7 +2230,7 @@ def update_config(param_cfg, param_data):
     zmax = param_data['zp_metrics'][survey][ref_filter]['zpmax']
     mstar_file = param_data['magstar_file'][survey][ref_filter]
     magstar = _mstar_(mstar_file, zmax) 
-    dmag_max = param_cfg['wazp_cfg']['dmag_det']
+    dmag_max = param_cfg['detection_cfg']['dmag_det']
     maglim_det = _mstar_(mstar_file, zmax) + dmag_max
     print ('.... adopted maglim_det  = ', np.round(maglim_det, 2))
 

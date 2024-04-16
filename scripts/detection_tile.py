@@ -1,8 +1,8 @@
 import numpy as np
 import yaml, os, sys
 
-from lib.utils import read_FitsCat, create_tile_specs
-from lib.pmem import pmem_tile
+from wazp.utils import read_FitsCat, create_tile_specs
+from wazp.detection import wazp_tile
 
 # read config files as online arguments 
 config = sys.argv[1]
@@ -15,53 +15,51 @@ with open(config) as fstream:
 with open(dconfig) as fstream:
     param_data = yaml.safe_load(fstream)
 
+# load config info
 survey, ref_filter  = param_cfg['survey'], param_cfg['ref_filter']
-maglim = param_cfg['maglim_pmem']
+maglim = param_cfg['maglim_det']
 galcat = param_data['galcat'][survey]
-clcat = param_data['clcat'][param_cfg['clusters']]
+clcat = param_cfg['clcat']
 out_paths = param_cfg['out_paths']
 admin = param_cfg['admin']
 footprint = param_data['footprint'][survey]
 zp_metrics = param_data['zp_metrics'][survey][ref_filter]
 magstar_file = param_data['magstar_file'][survey][ref_filter]
-workdir = out_paths['workdir']
-data_cls = read_FitsCat(param_data['clcat'][param_cfg['clusters']]['cat'])
+detection_cfg = param_cfg['detection_cfg']
 
 # load tiles info
+workdir = out_paths['workdir']
 all_tiles = read_FitsCat(
     os.path.join(
-        workdir, admin['tiling_pmem']['rpath'],
-        admin['tiling_pmem']['tiles_filename'])
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['tiles_filename'])
 )
 hpix_tile_lists = np.load(
     os.path.join(
-        workdir, admin['tiling_pmem']['rpath'],
-        admin['tiling_pmem']['tiles_npy']
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['tiles_npy']
     ), 
     allow_pickle=True
 )
 hpix_core_lists = np.load(
     os.path.join(
-        workdir, admin['tiling_pmem']['rpath'],
-        admin['tiling_pmem']['sky_partition_npy']
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['sky_partition_npy']
     ), 
     allow_pickle=True
 )
 
 # generate tile specs and run detection
 tile_specs = create_tile_specs(
-    admin['target_mode'], admin['tiling_pmem'],
+    admin['target_mode'], admin['tiling_detection'],
     all_tiles[tile_id],  
-    hpix_core_lists[tile_id], hpix_tile_lists[tile_id],
+    hpix_core_lists[tile_id], hpix_tile_lists[tile_id]
 )
-
-pmem_tile(
-    admin, tile_specs,
-    param_cfg['pmem_cfg'], 
-    data_cls, data_cls, clcat, 
-    footprint, galcat, maglim, 
-    zp_metrics, param_cfg['cosmo_params'],
-    magstar_file, out_paths, param_cfg['verbose']
-)
-
+wazp_tile(
+    admin, tile_specs, 
+    galcat, footprint, 
+    magstar_file, maglim,
+    detection_cfg, clcat, param_cfg['cosmo_params'], 
+    out_paths, param_cfg['verbose'] 
+) 
 

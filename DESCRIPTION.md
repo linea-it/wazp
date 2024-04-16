@@ -6,8 +6,8 @@ WaZP content :
 - call script :    wazp_main.py 
 - parameter file : wazp.cfg 
 - data config:     data.cfg
-- lib/ : wazp.py  pmem.py utils.py  multithread.py 
-- aux/ : auxiliary files 
+- wazp/ : detection.py  pmem.py utils.py  multithread.py 
+- aux_data/ : auxiliary files 
        	 + mag_star files for each survey/filter 
 - input_data/ : example of input galcat + footprint 
 - output_ref/ : example of output with verbose=1

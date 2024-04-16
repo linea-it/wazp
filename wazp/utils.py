@@ -21,7 +21,7 @@ def create_slurm_script(task, config, dconfig, narray, script):
         narray, slurm_cfg['max_parallel']
     )
 
-    scr = __file__.replace('lib/utils.py', '')
+    scr = __file__.replace('wazp/utils.py', 'scripts/')
 
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")

@@ -51,18 +51,46 @@ wazp_main generates and launches 4 sbatch scripts in array mode with dependencie
 
 ## Installation 
 
-Clone the repository and create an environment with Conda:
+Create an environment with Conda:
 ```bash
-git clone https://github.com/linea-it/wazp && cd wazp 
 conda create -n wazp python=3.11
 conda activate wazp
 conda install -c conda-forge cfitsio=3.430
 conda install -c cta-observatory sparse2d
-pip install scikit-image
-pip install -U scikit-learn
-pip install astropy
-pip install healpy
-ipython kernel install --user --name=wazp
+conda install -c conda-forge pip
 ```
+
+Clone the repository:
+```bash
+git clone https://github.com/linea-it/wazp
+```
+
+Install WaZP with:
+```bash
+cd wazp/
+python setup.py install
+```
+
+or
+
+```bash
+pip install wazp/
+```
+
+or, for developers
+
+```bash
+pip install -e wazp/
+```
+
+
+## Execution
+```bash
+python [wazp/script path]/wazp_main.py wazp.cfg [wazp path]/data.cfg
+```
+Can be launched from anywhere.
+Outputs are written in the wazp.cfg file under -workdir-
+Make sure data.cfg describes your data and its location on disc. 
+
 
 
