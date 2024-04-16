@@ -90,7 +90,7 @@ python [wazp/script path]/wazp_main.py wazp.cfg [wazp path]/data.cfg
 ```
 Can be launched from anywhere.
 Outputs are written in the wazp.cfg file under -workdir-
-Make sur data.cfg describes your data and its location on disc. 
+Make sure data.cfg describes your data and its location on disc. 
 
 
 
