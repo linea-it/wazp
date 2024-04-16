@@ -49,7 +49,7 @@ config, dconfig = store_wazp_confs(workdir, param_cfg, param_data)
 
 # useful keys 
 admin = param_cfg['admin']
-wazp_cfg = param_cfg['wazp_cfg']
+detection_cfg = param_cfg['detection_cfg']
 pmem_cfg = param_cfg['pmem_cfg']
 cosmo_params = param_cfg['cosmo_params']
 ref_filter = param_cfg['ref_filter']
@@ -58,12 +58,12 @@ clusters = param_cfg['clusters']
 # compute zp slicing 
 compute_zpslices(
     param_data['zp_metrics'][survey][ref_filter], 
-    wazp_cfg, -1., workdir
+    detection_cfg, -1., workdir
 )
 
 # Partition for bkg & detection 
-ntiles_wazp = sky_partition(
-    admin['tiling_wazp'], 
+ntiles_detection = sky_partition(
+    admin['tiling_detection'], 
     param_data['galcat'][survey]['mosaic']['dir'],
     param_data['footprint'][survey], workdir
 )
@@ -78,19 +78,19 @@ ntiles_pmem = sky_partition(
 # compute global bkg ppties 
 bkg_global_survey(
     param_data['galcat'][survey], param_data['footprint'][survey], 
-    admin['tiling_wazp'], cosmo_params, 
+    admin['tiling_detection'], cosmo_params, 
     param_data['magstar_file'][survey][ref_filter], 
-    wazp_cfg, workdir
+    detection_cfg, workdir
 )
 
 # run detection 
-print ('Run wazp_tile / slurm ')
+print ('Run detection_tile / slurm ')
 job_id1 = slurm_submit(
-    'wazp_tile', config, dconfig, narray=ntiles_wazp
+    'detection_tile', config, dconfig, narray=ntiles_detection
 )
 # concatenate 
 job_id2 = slurm_submit(
-    'wazp_concatenate', config, dconfig, dep=job_id1
+    'detection_concatenate', config, dconfig, dep=job_id1
 )
 
 # run Pmem 

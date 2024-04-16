@@ -25,33 +25,33 @@ admin = param_cfg['admin']
 footprint = param_data['footprint'][survey]
 zp_metrics = param_data['zp_metrics'][survey][ref_filter]
 magstar_file = param_data['magstar_file'][survey][ref_filter]
-wazp_cfg = param_cfg['wazp_cfg']
+detection_cfg = param_cfg['detection_cfg']
 
 # load tiles info
 workdir = out_paths['workdir']
 all_tiles = read_FitsCat(
     os.path.join(
-        workdir, admin['tiling_wazp']['rpath'],
-        admin['tiling_wazp']['tiles_filename'])
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['tiles_filename'])
 )
 hpix_tile_lists = np.load(
     os.path.join(
-        workdir, admin['tiling_wazp']['rpath'],
-        admin['tiling_wazp']['tiles_npy']
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['tiles_npy']
     ), 
     allow_pickle=True
 )
 hpix_core_lists = np.load(
     os.path.join(
-        workdir, admin['tiling_wazp']['rpath'],
-        admin['tiling_wazp']['sky_partition_npy']
+        workdir, admin['tiling_detection']['rpath'],
+        admin['tiling_detection']['sky_partition_npy']
     ), 
     allow_pickle=True
 )
 
 # generate tile specs and run detection
 tile_specs = create_tile_specs(
-    admin['target_mode'], admin['tiling_wazp'],
+    admin['target_mode'], admin['tiling_detection'],
     all_tiles[tile_id],  
     hpix_core_lists[tile_id], hpix_tile_lists[tile_id]
 )
@@ -59,7 +59,7 @@ wazp_tile(
     admin, tile_specs, 
     galcat, footprint, 
     magstar_file, maglim,
-    wazp_cfg, clcat, param_cfg['cosmo_params'], 
+    detection_cfg, clcat, param_cfg['cosmo_params'], 
     out_paths, param_cfg['verbose'] 
 ) 
 

@@ -19,27 +19,27 @@ with open(dconfig) as fstream:
 workdir = param_cfg['out_paths']['workdir']
 out_paths = param_cfg['out_paths']
 admin = param_cfg['admin']
-wazp_cfg = param_cfg['wazp_cfg']
+detection_cfg = param_cfg['detection_cfg']
 clcat = param_cfg['clcat']
 cosmo_params = param_cfg['cosmo_params']
 tiles_filename = os.path.join(
-    workdir, admin['tiling_wazp']['rpath'], 
-    admin['tiling_wazp']['tiles_filename']
+    workdir, admin['tiling_detection']['rpath'], 
+    admin['tiling_detection']['tiles_filename']
 )
 all_tiles = read_FitsCat(tiles_filename)
 zpslices_filename = os.path.join(
     workdir, 
-    wazp_cfg['zpslices_filename']
+    detection_cfg['zpslices_filename']
 )
 zpslices = read_FitsCat(zpslices_filename)
 
 
 # concatenate all tiles 
-data_clusters0 = concatenate_cl_tiles(out_paths, all_tiles, 'wazp')
+data_clusters0 = concatenate_cl_tiles(out_paths, all_tiles, 'detection')
 
 # final filtering of duplicates & zpmax
 data_clusters0f = cl_duplicates_filtering(
-    data_clusters0, wazp_cfg, clcat, zpslices, cosmo_params, 
+    data_clusters0, detection_cfg, clcat, zpslices, cosmo_params, 
     'survey'
 )
 
