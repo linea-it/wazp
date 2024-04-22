@@ -1147,10 +1147,12 @@ def footprint_with_cl_masks (my_cluster, data_cls, clcat_keys,
     hpix_map, frac_map = data_fp[hpx_meta['key_pixel']],\
                          data_fp[hpx_meta['key_frac']]
     conv_factor = my_cluster['conv_factor']
+    snr_cl = my_cluster['snr_cl']
 
     cl_mask_radius_mpc = periphery_specs['radius_msk_mpc']
     snr = data_cls[clcat_keys[periphery_specs['key_select']]]
-    cond_snr = (snr>periphery_specs['select_min'])
+    #cond_snr = (snr>periphery_specs['select_min'])
+    cond_snr = (snr>snr_cl)
 
     if len(data_cls[cond_snr]) >0:
         # select clusters falling in cl outer region 
