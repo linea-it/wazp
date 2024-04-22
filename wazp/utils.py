@@ -26,23 +26,21 @@ def create_slurm_script(task, config, dconfig, narray, script):
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")
     f.write(f"#SBATCH --job-name={task}\n")
+    f.write(f"#SBATCH --partition={slurm_cfg['partition']}\n")
     f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
-    if narray<=slurm_cfg['max_parallel']:
-        f.write(f"#SBATCH --ntasks={narray}\n")
-    else:
-        f.write(f"#SBATCH --ntasks={slurm_cfg['max_parallel']}\n")
+    if narray == 1:
+        f.write(f"#SBATCH --ntasks=1\n")
     if narray > 1:
-        f.write(
-            f"#SBATCH --cpus-per-task={slurm_cfg['cpus-per-task']}\n"
-        )
         f.write(
             f"#SBATCH --array=0-{narray-1}%{slurm_cfg['max_parallel']}\n"
         )
     f.write(f"#SBATCH --mem={slurm_cfg['memory'][task]}G\n")
     if narray > 1:
-        f.write(f"python {scr}{task}.py {config} {dconfig} $SLURM_ARRAY_TASK_ID\n")
+        f.write(
+            f"python {scr}{task}.py {config} {dconfig} $SLURM_ARRAY_TASK_ID\n")
     else:
-        f.write(f"python {scr}{task}.py  {config} {dconfig} 0\n")
+        f.write(
+            f"python {scr}{task}.py  {config} {dconfig} 0\n")
     f.close()
     return 
     
