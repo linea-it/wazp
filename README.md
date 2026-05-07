@@ -56,14 +56,16 @@ Create an environment with Conda:
 git clone https://github.com/linea-it/wazp && cd wazp 
 conda create -n wazp python=3.11
 conda activate wazp
+conda install numpy
+conda install matplotlib
 conda install -c conda-forge cfitsio=3.430
 conda install -c cta-observatory sparse2d
+conda install -c conda-forge pip
 pip install scikit-image
 pip install -U scikit-learn
 pip install astropy
 pip install healpy
 ipython kernel install --user --name=wazp
-conda install -c conda-forge pip
 ```
 
 Clone the repository:
