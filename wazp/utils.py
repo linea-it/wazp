@@ -21,7 +21,7 @@ def create_slurm_script(task, config, dconfig, narray, script):
         narray, slurm_cfg['max_parallel']
     )
 
-    scr = __file__.replace('lib/utils.py', '')
+    scr = __file__.replace('wazp/utils.py', 'scripts/')
 
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")
@@ -1118,7 +1118,6 @@ def sky_partition(tiling, gdir, footprint, workdir):
         print ('......Nr. of Tiles = ', ntiles)
 
         for i in range(0, ntiles):
-
             if (ntiles>10):
                 if (i % 10) == 0:
                     print ('......Tile ',i, ' / ', ntiles)
