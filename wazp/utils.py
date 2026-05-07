@@ -26,7 +26,10 @@ def create_slurm_script(task, config, dconfig, narray, script):
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")
     f.write(f"#SBATCH --job-name={task}\n")
-    f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
+    for key, value in slurm_cfg.items():
+        if key not in ('max_parallel', 'cpus-per-task', 'memory'):
+            f.write(f"#SBATCH --{key}={cfg}\n")
+
     if narray<=slurm_cfg['max_parallel']:
         f.write(f"#SBATCH --ntasks={narray}\n")
     else:
