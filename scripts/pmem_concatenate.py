@@ -21,11 +21,7 @@ with open(dconfig) as fstream:
 workdir = param_cfg['out_paths']['workdir']
 out_paths = param_cfg['out_paths']
 admin = param_cfg['admin']
-<<<<<<< HEAD
-wazp_cfg = param_cfg['wazp_cfg']
-=======
 detection_cfg = param_cfg['detection_cfg']
->>>>>>> temp
 pmem_cfg = param_cfg['pmem_cfg']
 tiles_filename = os.path.join(
     workdir, admin['tiling_pmem']['rpath'], 
@@ -56,11 +52,7 @@ data_clusters_with_rich = join(data_clusters, data_richness)
 #produce wazp cat for distribution
 official_wazp_cat(
     data_clusters_with_rich, param_cfg['clcat'][clusters]['keys'], 
-<<<<<<< HEAD
-    pmem_cfg['richness_specs'], wazp_cfg['rich_min'],
-=======
     pmem_cfg['richness_specs'], detection_cfg['rich_min'],
->>>>>>> temp
     os.path.join(workdir, 'wazp_clusters.fits')
 )
 
