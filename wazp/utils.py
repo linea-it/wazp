@@ -26,10 +26,14 @@ def create_slurm_script(task, config, dconfig, narray, script):
     f = open(f"{script}", "w")
     f.write("#!/bin/sh\n")
     f.write(f"#SBATCH --job-name={task}\n")
-    f.write(f"#SBATCH --partition={slurm_cfg['partition']}\n")
-    f.write(f"#SBATCH --time={slurm_cfg['time']}\n")
-    if narray == 1:
-        f.write(f"#SBATCH --ntasks=1\n")
+    for key, value in slurm_cfg.items():
+        if key not in ('max_parallel', 'cpus-per-task', 'memory'):
+            f.write(f"#SBATCH --{key}={cfg}\n")
+
+    if narray<=slurm_cfg['max_parallel']:
+        f.write(f"#SBATCH --ntasks={narray}\n")
+    else:
+        f.write(f"#SBATCH --ntasks={slurm_cfg['max_parallel']}\n")
     if narray > 1:
         f.write(
             f"#SBATCH --array=0-{narray-1}%{slurm_cfg['max_parallel']}\n"
@@ -1114,6 +1118,7 @@ def sky_partition(tiling, gdir, footprint, workdir):
         
         ntiles = len(partition)
         print ('......Nr. of Tiles = ', ntiles)
+
         for i in range(0, ntiles):
             if (ntiles>10):
                 if (i % 10) == 0:
