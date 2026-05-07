@@ -53,10 +53,16 @@ wazp_main generates and launches 4 sbatch scripts in array mode with dependencie
 
 Create an environment with Conda:
 ```bash
+git clone https://github.com/linea-it/wazp && cd wazp 
 conda create -n wazp python=3.11
 conda activate wazp
 conda install -c conda-forge cfitsio=3.430
 conda install -c cta-observatory sparse2d
+pip install scikit-image
+pip install -U scikit-learn
+pip install astropy
+pip install healpy
+ipython kernel install --user --name=wazp
 conda install -c conda-forge pip
 ```
 

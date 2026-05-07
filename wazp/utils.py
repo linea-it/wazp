@@ -1116,6 +1116,7 @@ def sky_partition(tiling, gdir, footprint, workdir):
         
         ntiles = len(partition)
         print ('......Nr. of Tiles = ', ntiles)
+
         for i in range(0, ntiles):
             if (ntiles>10):
                 if (i % 10) == 0:
