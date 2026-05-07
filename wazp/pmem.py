@@ -2213,199 +2213,6 @@ def data_gal_tile_from_mosaic (galcat_mosaic_specs, galcat_keys,
                                       racl, deccl, radius_max_deg)
 
 
-def prepare_galaxies(verbose, dat_galcat, dat_footprint, galcat, footprint,
-                     tile_dir, tile_specs, maglim, pmem_cfg):
-
-    if dat_galcat is None:
-        data_gal_tile, data_fp_tile = make_tile_cat(
-            tile_specs,
-            galcat, footprint,
-            maglim, pmem_cfg
-        )        
-        if verbose >=2:
-            t = Table (data_gal_tile)
-            t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
-            t = Table (data_fp_tile)
-            t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
-    else:   
-        data_gal_tile, data_fp_tile = dat_galcat, dat_footprint
-
-    return data_gal_tile, data_fp_tile
-
-
-def prepare_clusters(
-        target_mode, data_cls_all, data_cls_analysis, clcat, tile_specs):
-
-    if not target_mode:
-        # extract clusters in tile
-        data_cls_tile = read_sources_in_hpixs(
-            data_cls_all, clcat,
-            tile_specs['hpix_tile'], tile_specs['Nside'], tile_specs['nest']
-        )
-        data_cls_analysis_tile = read_sources_in_hpixs(
-            data_cls_analysis, clcat,
-            tile_specs['hpix_core'], tile_specs['Nside'], tile_specs['nest']
-        )
-    else:
-        data_cls_tile = np.copy(data_cls_all)
-        data_cls_analysis_tile = np.copy(data_cls_analysis)
-    print ('Pmem / Nr of clusters in tile ', len(data_cls_tile))
-
-    # sort by decreasing parameter (mass-snr..etc)
-    key_rank = data_cls_analysis_tile[clcat['key_rank']]
-    data_cls_analysis_tile = data_cls_analysis_tile[np.argsort(-key_rank)]
-    
-    return data_cls_tile, data_cls_analysis_tile
-
-
-def condition_bad_redshift(pmem_cfg, data_cluster, data_richness, clcat, i):
-    bad = False
-    zcl =   data_cluster[clcat['key_zp']]
-    if (zcl < pmem_cfg['global_conditions']['zcl_min'] or 
-        zcl > pmem_cfg['global_conditions']['zcl_max']):
-        data_richness['flag_pmem'][i] = 1
-        bad = True
-    return bad
-
-
-def condition_no_gal(data_lgal, data_richness, i):
-    no_gal = False
-    if len(data_lgal) == 0:
-        data_richness['flag_pmem'][i] = 2
-        no_gal = True
-    return no_gal
-
-
-def condition_bad_cl_cover(cl_wcfc, pmem_cfg, data_richness, i):
-    bad_cl_cover = False
-    if 100.*cl_wcfc < pmem_cfg['global_conditions']['cl_cover_min']:
-        data_richness['flag_pmem'][i] = 3
-        bad_cl_cover = True
-    return bad_cl_cover
-
-
-def condition_bad_bkg_cover(bkg_wmask_cfc, pmem_cfg, data_richness, i):
-    bad_bkg_cover = False
-    if 100.*bkg_wmask_cfc < pmem_cfg['global_conditions']['bkg_cover_min']:
-        data_richness['flag_pmem'][i] = 4
-        bad_bkg_cover = True
-    return bad_bkg_cover
-
-
-def condition_pmem_exit(data_cls_tile, tile_dir, out_paths):
-    cond_exit = False
-    if len(data_cls_tile) > 0:
-        if os.path.isfile(
-                os.path.join(
-                    tile_dir, 
-                    out_paths['pmem']['results'], 
-                    "richness.fits")):
-            cond_exit=True
-    return cond_exit
-
-
-def print_cl_log1(verbose, data_cluster, clcat, ncl, i):
-
-    idcl =  data_cluster[clcat['key_id']]
-    racl =  data_cluster[clcat['key_ra']]
-    deccl = data_cluster[clcat['key_dec']]
-    zcl =   data_cluster[clcat['key_zp']]
-    snr =   data_cluster[clcat['key_snr']]
-        
-    if verbose>=1:
-        print ('')
-        print ('( '+str(i+1)+'/'+str(ncl)+\
-               ' )   Cluster ID = '+str(idcl)+\
-               '      ra = '+str(round(racl,3))+\
-               '      dec = '+str(round(deccl,3))+\
-               '      zcl = '+str(round(zcl,2))+\
-               '      snr = '+str(round(snr,2)))
-    return
-
-
-def print_cl_log2(verbose, data_lgal):
-    if verbose>=1:
-        print('    Nr. of galaxies in cluster field = '+str(len(data_lgal)))
-    return
-
-
-def print_cl_log3(verbose, ncl_masked):
-    if verbose>=1:
-        print ('    Nr of masked clusters in periphery : ', ncl_masked)
-    return
-
-
-def print_cl_log4(verbose, cl_cfc, cl_wcfc, bkg_cfc, bkg_wmask_cfc):
-        
-    if verbose>=1: 
-        print (
-            '    Cluster coverage (%)    raw = '+\
-            str(round(100.*cl_cfc, 1))+\
-            "     weighted = "+str(round(100.*cl_wcfc, 1))
-        )
-        print (
-            '    Bkg     coverage (%)    raw = '+\
-            str(round(100.*bkg_cfc, 1))+\
-            " with cl.masks = "+str(round(100.*bkg_wmask_cfc, 1))
-        )
-    return
-
-
-def plot_cl_log5(verbose, my_cluster, data_lfp, footprint, 
-                 pmem_cfg, bkg_cfc, cl_cfc, cl_wcfc, ncl_masked, out_paths):
-
-    idcl = my_cluster['idcl']
-    if verbose >= 2:
-        plot_footprint(
-            my_cluster, data_lfp, footprint, 
-            pmem_cfg['bkg_specs']['radius_min_mpc'], 
-            pmem_cfg['bkg_specs']['radius_max_mpc'], 
-            pmem_cfg['weighted_coverfrac_specs']['radius_mpc'], 
-            bkg_cfc, cl_cfc, cl_wcfc, 
-            os.path.join(
-                out_paths['workdir_loc'], 
-                out_paths['pmem']['plots'], 
-                'footprint_cl'+str(idcl)+'.png'
-            )
-        )
-    
-        if ncl_masked > 0:
-            plot_footprint(
-                my_cluster, data_lfp_mask, footprint, 
-                pmem_cfg['bkg_specs']['radius_min_mpc'], 
-                pmem_cfg['bkg_specs']['radius_max_mpc'], 
-                pmem_cfg['weighted_coverfrac_specs']['radius_mpc'],
-                bkg_wmask_cfc, cl_cfc, cl_wcfc,
-                os.path.join(
-                    out_paths['workdir_loc'], 
-                    out_paths['pmem']['plots'], 
-                    'footprint_with_clmask_cl'+str(idcl)+'.png'
-                )
-            )
-    return
-
-
-def create_calib_file(data_for_calib_tile, pmem_cfg, my_cluster, footprint,
-                          data_gal_tile, galcat, out_paths):
-    # in calib_dz mode :
-    # produce list of galaxies in 1Mpc cylinders
-    # around clusters with SNR>SNRlim
-    if (pmem_cfg['calib_dz']['mode'] and 
-        my_cluster['snr_cl']>pmem_cfg['calib_dz']['snr_min']): 
-        data_for_calib = prepare_data_calib_dz(
-            my_cluster, pmem_cfg, footprint,
-            data_gal_tile, galcat['keys']
-        )
-        if data_for_calib is not None:
-            if data_for_calib_tile is None:
-                data_for_calib_tile  = np.copy(data_for_calib)
-            else:
-                data_for_calib_tile  = np.hstack(
-                    (data_for_calib_tile,  data_for_calib)
-                )
-    return data_for_calib_tile
-
-
 def pmem_tile(admin, tile_specs,
               pmem_cfg, data_cls_analysis, data_cls_all, clcat,
               footprint, galcat, maglim, 
@@ -3055,5 +2862,196 @@ def tiles_with_clusters(out_paths, all_tiles):
     return all_tiles[flag==1]
 
 
+def prepare_galaxies(verbose, dat_galcat, dat_footprint, galcat, footprint,
+                     tile_dir, tile_specs, maglim, pmem_cfg):
+
+    if dat_galcat is None:
+        data_gal_tile, data_fp_tile = make_tile_cat(
+            tile_specs,
+            galcat, footprint,
+            maglim, pmem_cfg
+        )        
+        if verbose >=2:
+            t = Table (data_gal_tile)
+            t.write(os.path.join(tile_dir, "galcat.fits"),overwrite=True)
+            t = Table (data_fp_tile)
+            t.write(os.path.join(tile_dir, "footprint.fits"),overwrite=True)
+    else:   
+        data_gal_tile, data_fp_tile = dat_galcat, dat_footprint
+
+    return data_gal_tile, data_fp_tile
+
+
+def prepare_clusters(
+        target_mode, data_cls_all, data_cls_analysis, clcat, tile_specs):
+
+    if not target_mode:
+        # extract clusters in tile
+        data_cls_tile = read_sources_in_hpixs(
+            data_cls_all, clcat,
+            tile_specs['hpix_tile'], tile_specs['Nside'], tile_specs['nest']
+        )
+        data_cls_analysis_tile = read_sources_in_hpixs(
+            data_cls_analysis, clcat,
+            tile_specs['hpix_core'], tile_specs['Nside'], tile_specs['nest']
+        )
+    else:
+        data_cls_tile = np.copy(data_cls_all)
+        data_cls_analysis_tile = np.copy(data_cls_analysis)
+    print ('Pmem / Nr of clusters in tile ', len(data_cls_tile))
+
+    # sort by decreasing parameter (mass-snr..etc)
+    key_rank = data_cls_analysis_tile[clcat['key_rank']]
+    data_cls_analysis_tile = data_cls_analysis_tile[np.argsort(-key_rank)]
+    
+    return data_cls_tile, data_cls_analysis_tile
+
+
+def condition_bad_redshift(pmem_cfg, data_cluster, data_richness, clcat, i):
+    bad = False
+    zcl =   data_cluster[clcat['key_zp']]
+    if (zcl < pmem_cfg['global_conditions']['zcl_min'] or 
+        zcl > pmem_cfg['global_conditions']['zcl_max']):
+        data_richness['flag_pmem'][i] = 1
+        bad = True
+    return bad
+
+
+def condition_no_gal(data_lgal, data_richness, i):
+    no_gal = False
+    if len(data_lgal) == 0:
+        data_richness['flag_pmem'][i] = 2
+        no_gal = True
+    return no_gal
+
+
+def condition_bad_cl_cover(cl_wcfc, pmem_cfg, data_richness, i):
+    bad_cl_cover = False
+    if 100.*cl_wcfc < pmem_cfg['global_conditions']['cl_cover_min']:
+        data_richness['flag_pmem'][i] = 3
+        bad_cl_cover = True
+    return bad_cl_cover
+
+
+def condition_bad_bkg_cover(bkg_wmask_cfc, pmem_cfg, data_richness, i):
+    bad_bkg_cover = False
+    if 100.*bkg_wmask_cfc < pmem_cfg['global_conditions']['bkg_cover_min']:
+        data_richness['flag_pmem'][i] = 4
+        bad_bkg_cover = True
+    return bad_bkg_cover
+
+
+def condition_pmem_exit(data_cls_tile, tile_dir, out_paths):
+    cond_exit = False
+    if len(data_cls_tile) > 0:
+        if os.path.isfile(
+                os.path.join(
+                    tile_dir, 
+                    out_paths['pmem']['results'], 
+                    "richness.fits")):
+            cond_exit=True
+    return cond_exit
+
+
+def print_cl_log1(verbose, data_cluster, clcat, ncl, i):
+
+    idcl =  data_cluster[clcat['key_id']]
+    racl =  data_cluster[clcat['key_ra']]
+    deccl = data_cluster[clcat['key_dec']]
+    zcl =   data_cluster[clcat['key_zp']]
+    snr =   data_cluster[clcat['key_snr']]
+        
+    if verbose>=1:
+        print ('')
+        print ('( '+str(i+1)+'/'+str(ncl)+\
+               ' )   Cluster ID = '+str(idcl)+\
+               '      ra = '+str(round(racl,3))+\
+               '      dec = '+str(round(deccl,3))+\
+               '      zcl = '+str(round(zcl,2))+\
+               '      snr = '+str(round(snr,2)))
+    return
+
+
+def print_cl_log2(verbose, data_lgal):
+    if verbose>=1:
+        print('    Nr. of galaxies in cluster field = '+str(len(data_lgal)))
+    return
+
+
+def print_cl_log3(verbose, ncl_masked):
+    if verbose>=1:
+        print ('    Nr of masked clusters in periphery : ', ncl_masked)
+    return
+
+
+def print_cl_log4(verbose, cl_cfc, cl_wcfc, bkg_cfc, bkg_wmask_cfc):
+        
+    if verbose>=1: 
+        print (
+            '    Cluster coverage (%)    raw = '+\
+            str(round(100.*cl_cfc, 1))+\
+            "     weighted = "+str(round(100.*cl_wcfc, 1))
+        )
+        print (
+            '    Bkg     coverage (%)    raw = '+\
+            str(round(100.*bkg_cfc, 1))+\
+            " with cl.masks = "+str(round(100.*bkg_wmask_cfc, 1))
+        )
+    return
+
+
+def plot_cl_log5(verbose, my_cluster, data_lfp, footprint, 
+                 pmem_cfg, bkg_cfc, cl_cfc, cl_wcfc, ncl_masked, out_paths):
+
+    idcl = my_cluster['idcl']
+    if verbose >= 2:
+        plot_footprint(
+            my_cluster, data_lfp, footprint, 
+            pmem_cfg['bkg_specs']['radius_min_mpc'], 
+            pmem_cfg['bkg_specs']['radius_max_mpc'], 
+            pmem_cfg['weighted_coverfrac_specs']['radius_mpc'], 
+            bkg_cfc, cl_cfc, cl_wcfc, 
+            os.path.join(
+                out_paths['workdir_loc'], 
+                out_paths['pmem']['plots'], 
+                'footprint_cl'+str(idcl)+'.png'
+            )
+        )
+    
+        if ncl_masked > 0:
+            plot_footprint(
+                my_cluster, data_lfp_mask, footprint, 
+                pmem_cfg['bkg_specs']['radius_min_mpc'], 
+                pmem_cfg['bkg_specs']['radius_max_mpc'], 
+                pmem_cfg['weighted_coverfrac_specs']['radius_mpc'],
+                bkg_wmask_cfc, cl_cfc, cl_wcfc,
+                os.path.join(
+                    out_paths['workdir_loc'], 
+                    out_paths['pmem']['plots'], 
+                    'footprint_with_clmask_cl'+str(idcl)+'.png'
+                )
+            )
+    return
+
+
+def create_calib_file(data_for_calib_tile, pmem_cfg, my_cluster, footprint,
+                          data_gal_tile, galcat, out_paths):
+    # in calib_dz mode :
+    # produce list of galaxies in 1Mpc cylinders
+    # around clusters with SNR>SNRlim
+    if (pmem_cfg['calib_dz']['mode'] and 
+        my_cluster['snr_cl']>pmem_cfg['calib_dz']['snr_min']): 
+        data_for_calib = prepare_data_calib_dz(
+            my_cluster, pmem_cfg, footprint,
+            data_gal_tile, galcat['keys']
+        )
+        if data_for_calib is not None:
+            if data_for_calib_tile is None:
+                data_for_calib_tile  = np.copy(data_for_calib)
+            else:
+                data_for_calib_tile  = np.hstack(
+                    (data_for_calib_tile,  data_for_calib)
+                )
+    return data_for_calib_tile
 
 
