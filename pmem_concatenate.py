@@ -2,11 +2,11 @@ import numpy as np
 import yaml, os, sys
 from astropy.table import join
 
-from lib.utils import read_FitsCat
-from lib.wazp import tiles_with_clusters, official_wazp_cat
+from wazp.utils import read_FitsCat
+from wazp.detection import official_wazp_cat
 
-from lib.pmem import pmem_concatenate_tiles
-from lib.pmem import concatenate_calib_dz, eff_tiles_for_pmem
+from wazp.pmem import pmem_concatenate_tiles
+from wazp.pmem import concatenate_calib_dz, eff_tiles_for_pmem
 
 
 # read config files as online arguments 
@@ -21,7 +21,11 @@ with open(dconfig) as fstream:
 workdir = param_cfg['out_paths']['workdir']
 out_paths = param_cfg['out_paths']
 admin = param_cfg['admin']
+<<<<<<< HEAD
 wazp_cfg = param_cfg['wazp_cfg']
+=======
+detection_cfg = param_cfg['detection_cfg']
+>>>>>>> temp
 pmem_cfg = param_cfg['pmem_cfg']
 tiles_filename = os.path.join(
     workdir, admin['tiling_pmem']['rpath'], 
@@ -52,7 +56,11 @@ data_clusters_with_rich = join(data_clusters, data_richness)
 #produce wazp cat for distribution
 official_wazp_cat(
     data_clusters_with_rich, param_cfg['clcat'][clusters]['keys'], 
+<<<<<<< HEAD
     pmem_cfg['richness_specs'], wazp_cfg['rich_min'],
+=======
+    pmem_cfg['richness_specs'], detection_cfg['rich_min'],
+>>>>>>> temp
     os.path.join(workdir, 'wazp_clusters.fits')
 )
 

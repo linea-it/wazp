@@ -1,8 +1,8 @@
 import numpy as np
 import yaml, os, sys
 
-from lib.utils import read_FitsCat, create_tile_specs
-from lib.pmem import pmem_tile
+from wazp.utils import read_FitsCat, create_tile_specs
+from wazp.pmem import pmem_tile
 
 # read config files as online arguments 
 config = sys.argv[1]
