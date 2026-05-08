@@ -1,0 +1,124 @@
+name: versioning-ci
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**/*.md"
+      - "*.md"
+  pull_request:
+    branches:
+      - "*"
+    paths-ignore:
+      - "docs/**/*.md"
+      - "*.md"
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+env:
+  CONDA_ENV: wazp
+  CACHE_VERSION: 1
+
+jobs:
+  check-code-version:
+    name: Verify code version update
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/main'
+    steps:
+      # Get current version
+      - name: Check out the code
+        uses: actions/checkout@v4
+      - name: Get version from current branch
+        id: current_version
+        run: |
+          CURRENT_VERSION="$(grep -oP '__version__ = "\K[^"]+' wazp/__init__.py)"
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "my branch is ${{ github.ref }}"
+      # Get main version
+      - name: Checkout the main branch to get its version
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Get version from main branch
+        id: main_version
+        run: |
+          if [[ "$(git show origin/main:wazp/__init__.py)" == *"__version__"* ]]; then
+            MAIN_VERSION="$(grep -oP '__version__ = "\K[^"]+' wazp/__init__.py)"
+          else
+            echo "No version found at main, assuming version 0.0.0"
+            MAIN_VERSION="0.0.0"
+          fi
+          echo "MAIN_VERSION=$MAIN_VERSION" >> $GITHUB_ENV
+      - name: Get PR number
+        id: pr_number
+        run: |
+          # Fetch the pull request number from the GitHub context
+          PR_NUMBER=$(echo $GITHUB_REF | sed 's/refs\/pull\/\([0-9]*\)\/merge/\1/')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+      # Compare new version number
+      - name: Compare new version number
+        run: |
+          IFS=. read -r C1 C2 C3 <<< "$CURRENT_VERSION"
+          if [ "$MAIN_VERSION" == "1.0.2-1" ]; then MAIN_VERSION="1.0.2"; fi
+          IFS=. read -r M1 M2 M3 <<< "$MAIN_VERSION"
+          if [ "$C1" != "$M1" ]; then
+            GOAL="$((M1 + 1)).0.0"
+            if [ $C1 -lt $M1 ]; then
+              ERROR="  - Version number should increase: $CURRENT_VERSION<$MAIN_VERSION"
+            elif [ "$C1" != "$((M1 + 1))" ]; then
+              ERROR="  - Increment should be done by 1: $GOAL"
+            elif [ "$CURRENT_VERSION" != "$GOAL" ]; then
+              ERROR="  - When major version is increased, others should be zero: $GOAL"
+            fi
+          elif [ "$C2" != "$M2" ]; then
+            GOAL="$C1.$((M2 + 1)).0"
+            if [ $C2 -lt $M2 ]; then
+              ERROR="  - Version number should increase: $CURRENT_VERSION<$MAIN_VERSION"
+            elif [ "$C2" != "$((M2 + 1))" ]; then
+              ERROR="  - Increments should be done by 1: $GOAL"
+            elif [ "$CURRENT_VERSION" != "$GOAL" ]; then
+              ERROR="  - When middle version is increased, last number should be zero: $GOAL"
+            fi
+          elif [ "$C3" != "$M3" ]; then
+            GOAL="$C1.$C2.$((M3 + 1))"
+            if [ $C3 -lt $M3 ]; then
+              ERROR="  - Version number should increase: $CURRENT_VERSION<$MAIN_VERSION"
+            elif [ "$CURRENT_VERSION" != "$GOAL" ]; then
+              ERROR="  - Increments should be done by 1: $GOAL"
+            fi
+          else
+            ERROR="  - Version at wazp/__init__.py has not been updated!"
+          fi
+          echo "ERROR=$ERROR" >> $GITHUB_ENV
+      # Update PR title
+      - name: Get PR title and clean version number from it
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_TITLE="${TITLE% [version:*}"
+          echo "Clean title: $NEW_TITLE"
+          if [ "$ERROR" == "" ]; then
+            NEW_TITLE="${NEW_TITLE} [version:$CURRENT_VERSION]"
+            echo "New title: $NEW_TITLE"
+          fi
+          echo "Updating PR #$PR_NUMBER with new title: $NEW_TITLE"
+          curl -s -X PATCH \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d "{\"title\":\"$NEW_TITLE\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" > /dev/null
+      - name: Check version update
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$ERROR" != "" ]; then
+            echo "Check failed:"
+            echo "$ERROR"
+            exit 1
+          fi
+          echo "[ok] Version increased changed!"
